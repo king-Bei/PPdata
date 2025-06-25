@@ -10,3 +10,4 @@ packaging
 pillow
 pytesseract
 Werkzeug
+flask-cors
