@@ -1,0 +1,12 @@
+blinker
+click
+Flask
+itsdangerous
+Jinja2
+MarkupSafe
+numpy
+opencv-python-headless
+packaging
+pillow
+pytesseract
+Werkzeug

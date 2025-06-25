@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  mrz-api:
+    build: .
+    container_name: mrz-ocr-api
+    ports:
+      - "5002:5002"
+    environment:
+      - TESSDATA_PREFIX=/usr/share/tesseract-ocr/4.00/tessdata
+      - LANG=C.UTF-8
+    volumes:
+      - ./tessdata:/usr/share/tesseract-ocr/4.00/tessdata:ro
+    restart: unless-stopped
