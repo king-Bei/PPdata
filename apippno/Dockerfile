@@ -7,7 +7,8 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-COPY . /app
+# 複製應用程式與模板
+COPY app.py requirements.txt templates/ /app/
 
 # 確保 tessdata 目錄存在
 RUN mkdir -p /usr/share/tesseract-ocr/4.00/tessdata

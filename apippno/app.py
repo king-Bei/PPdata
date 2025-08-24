@@ -10,7 +10,7 @@ import csv
 import re
 from datetime import datetime
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder='templates')
 CORS(app, origins=["https://jollify.voyage.com.tw:8443"])  # 新增
 
 # 設定 Tesseract 的 TESSDATA_PREFIX 環境變數

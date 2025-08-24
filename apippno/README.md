@@ -43,7 +43,7 @@ python app.py
 
 ### API 端點
 
-- `GET /`  
+- `GET /`
   首頁
 
 - `POST /api/ocr`  
@@ -62,6 +62,7 @@ curl -F "image=@passport.jpg" http://localhost:5002/api/ocr
 
 - 若 tessdata 目錄非預設位置，請設定 `TESSDATA_PREFIX` 環境變數
 - 預設 CSV 輸出目錄：`/tmp/tmp_output`
+- HTML 模板位於 `apippno/templates/`
 
 ## 授權
 
