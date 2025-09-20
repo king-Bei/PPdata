@@ -1,4 +1,6 @@
 import os
+import base64
+import binascii
 import cv2
 import numpy as np
 from PIL import Image, ImageOps
@@ -42,25 +44,49 @@ def home():
 
 @app.route('/api/ocr', methods=['POST'])
 def ocr_in_memory():
-    """
-    OCR API: 接收圖片並提取護照 MRZ 資料
-    """
+    """OCR API: 接收圖片檔案或 Base64 字串並提取護照 MRZ 資料"""
+
     logging.info("📥 收到 OCR API 請求")
 
-    if 'image' not in request.files:
-        logging.warning("⚠️ 沒有上傳圖片")
-        return jsonify({'status': 'error', 'message': 'No image file provided'}), 400
+    file = request.files.get('image')
+    image_data = None
+    source_desc = None
 
-    file = request.files['image']
+    if file and file.filename != '':
+        image_data = file.read()
+        source_desc = f"上傳檔案 {file.filename}"
+        logging.info(f"📸 影像 {file.filename} 已讀取，大小: {len(image_data)} bytes")
+    else:
+        # 嘗試從 JSON 或表單欄位讀取 Base64 影像
+        payload = request.get_json(silent=True) or {}
+        base64_string = (
+            payload.get('image_base64')
+            or payload.get('image')
+            or request.form.get('image_base64')
+            or request.form.get('image')
+        )
+
+        if base64_string:
+            try:
+                # 支援 data URL 格式，如 data:image/png;base64,XXXX
+                if ',' in base64_string:
+                    base64_string = base64_string.split(',', 1)[1]
+
+                image_data = base64.b64decode(base64_string, validate=True)
+                source_desc = "Base64 字串"
+                logging.info(f"🧾 已解碼 Base64 影像，大小: {len(image_data)} bytes")
+            except (binascii.Error, ValueError) as decode_error:
+                logging.warning(f"⚠️ Base64 影像解析失敗: {decode_error}")
+                return jsonify({'status': 'error', 'message': 'Invalid base64 image data'}), 400
+
+    if image_data is None:
+        logging.warning("⚠️ 沒有上傳圖片或 Base64 資料")
+        return jsonify({'status': 'error', 'message': 'No image data provided'}), 400
 
     try:
-        # 讀取影像內容
-        image_data = file.read()
-        logging.info(f"📸 影像 {file.filename} 已讀取，大小: {len(image_data)} bytes")
-
         # 以 Pillow 開啟影像
         image = Image.open(io.BytesIO(image_data))
-        logging.info("🖼️ 影像已成功載入")
+        logging.info(f"🖼️ 影像來源: {source_desc} 已成功載入")
 
         # 影像預處理
         processed_image = preprocess_image_pil(image)

@@ -46,8 +46,8 @@ python app.py
 - `GET /`  
   首頁
 
-- `POST /api/ocr`  
-  上傳圖片檔（表單欄位：`image`），回傳解析後的 MRZ 資料（JSON 格式）
+- `POST /api/ocr`
+  上傳圖片檔（表單欄位：`image`）或傳送 Base64 字串（JSON 欄位：`image_base64` 或 `image`），回傳解析後的 MRZ 資料（JSON 格式）
 
 - `POST /api/ocr-csv`  
   上傳圖片檔（表單欄位：`image`），OCR 結果寫入 CSV 並回傳辨識文字
@@ -56,6 +56,11 @@ python app.py
 
 ```bash
 curl -F "image=@passport.jpg" http://localhost:5002/api/ocr
+
+# 或傳送 Base64 字串
+curl -X POST http://localhost:5002/api/ocr \
+  -H 'Content-Type: application/json' \
+  -d '{"image_base64": "<BASE64_DATA>"}'
 ```
 
 ## 設定說明
