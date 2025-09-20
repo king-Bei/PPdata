@@ -15,25 +15,60 @@ from datetime import datetime
 app = Flask(__name__)
 CORS(app, origins=["https://jollify.voyage.com.tw:8443"])  # 新增
 
-# 設定 Tesseract 的 TESSDATA_PREFIX 環境變數
-
-
-
 # 設定 log 檔案
 import logging
 
 logging.basicConfig(level=logging.INFO)
 
-# 定義 tessdata 路徑
-tessdata_dir = "/usr/share/tesseract-ocr/4.00/tessdata"
-ocrb_file = os.path.join(tessdata_dir, "ocrb.traineddata")
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+DEFAULT_TESSDATA_DIR = os.path.join(BASE_DIR, "tessdata")
 
-# 檢查 OCR 訓練數據是否存在
-if not os.path.exists(ocrb_file):
-    logging.error(f"❌ 訓練數據文件不存在: {ocrb_file}")
-    raise FileNotFoundError(f"❌ 訓練數據文件不存在: {ocrb_file}. 請確保文件已被正確部署到 {tessdata_dir} 中。")
-else:
-    logging.info(f"✅ 訓練數據文件已存在: {ocrb_file}")
+
+def _dedupe_preserve_order(items):
+    seen = set()
+    ordered = []
+    for item in items:
+        if not item:
+            continue
+        normalized = os.path.normpath(item)
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        ordered.append(normalized)
+    return ordered
+
+
+def resolve_tessdata_dir():
+    """Locate tessdata directory that contains ocrb.traineddata."""
+    env_prefix = os.environ.get("TESSDATA_PREFIX")
+    env_candidates = []
+    if env_prefix:
+        env_prefix = os.path.abspath(env_prefix)
+        env_candidates.append(env_prefix)
+        if os.path.basename(env_prefix) != "tessdata":
+            env_candidates.append(os.path.join(env_prefix, "tessdata"))
+
+    candidates = _dedupe_preserve_order([
+        *env_candidates,
+        DEFAULT_TESSDATA_DIR,
+        "/usr/share/tesseract-ocr/4.00/tessdata",
+        "/usr/share/tesseract-ocr/tessdata",
+    ])
+
+    for candidate in candidates:
+        ocrb_file = os.path.join(candidate, "ocrb.traineddata")
+        if os.path.exists(ocrb_file):
+            logging.info(f"✅ 訓練數據文件已存在: {ocrb_file}")
+            return candidate
+
+    logging.error("❌ 找不到 ocrb.traineddata，請確認 tessdata 目錄配置是否正確")
+    raise FileNotFoundError(
+        "❌ 無法找到 ocrb.traineddata。請確認已將檔案放置於 apippno/tessdata 或設定正確的 TESSDATA_PREFIX。"
+    )
+
+
+tessdata_dir = resolve_tessdata_dir()
+OCR_CONFIG = f'--tessdata-dir "{tessdata_dir}"'
 
 
 @app.route('/')
@@ -93,7 +128,7 @@ def ocr_in_memory():
         logging.info("🔄 影像已預處理完成")
 
         # OCR 辨識
-        detected_text = pytesseract.image_to_string(processed_image, lang='ocrb')
+        detected_text = pytesseract.image_to_string(processed_image, lang='ocrb', config=OCR_CONFIG)
         logging.info(f"✅ OCR 辨識完成，識別結果: {detected_text[:50]}...")
 
         # 解析 MRZ 資料
@@ -249,7 +284,7 @@ def ocr_in_memory_csv():
 
         # 預處理 + OCR
         processed_image = preprocess_image_pil(image)
-        detected_text = pytesseract.image_to_string(processed_image, lang='ocrb')
+        detected_text = pytesseract.image_to_string(processed_image, lang='ocrb', config=OCR_CONFIG)
         logging.info(f"✅ OCR 辨識完成，識別結果: {detected_text[:50]}...")
 
         # 準備寫入 CSV
