@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <title>登入 - MRZ OCR 控制台</title>
+    <style>
+        :root {
+            color-scheme: light;
+        }
+        body {
+            font-family: "Noto Sans TC", Arial, sans-serif;
+            background: #f5f6fa;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            color: #222;
+        }
+        .card {
+            background: #fff;
+            border-radius: 14px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+            max-width: 420px;
+            width: 100%;
+            padding: 32px;
+            border: 1px solid #e5e7eb;
+        }
+        h1 {
+            margin: 0 0 8px;
+            font-size: 24px;
+            letter-spacing: 0.3px;
+        }
+        p.subtitle {
+            margin: 0 0 24px;
+            color: #4b5563;
+        }
+        label {
+            display: block;
+            margin-bottom: 18px;
+        }
+        label span {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 6px;
+            color: #374151;
+        }
+        input[type="text"],
+        input[type="password"] {
+            width: 100%;
+            padding: 10px 12px;
+            border-radius: 10px;
+            border: 1px solid #d1d5db;
+            font-size: 15px;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+        input:focus {
+            outline: none;
+            border-color: #2563eb;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+        }
+        .actions {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+        button {
+            border: none;
+            padding: 10px 16px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 15px;
+        }
+        .btn-primary {
+            background: linear-gradient(120deg, #2563eb, #1d4ed8);
+            color: #fff;
+        }
+        .btn-secondary {
+            background: #e5e7eb;
+            color: #111827;
+        }
+        .meta {
+            margin-top: 20px;
+            padding: 14px;
+            background: #f9fafb;
+            border-radius: 12px;
+            border: 1px solid #e5e7eb;
+            color: #374151;
+            font-size: 14px;
+        }
+        .meta strong {
+            color: #111827;
+        }
+        .status {
+            margin-top: 10px;
+            font-size: 14px;
+        }
+        .status.error { color: #b91c1c; }
+        .status.success { color: #166534; }
+        .tag {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 999px;
+            background: #e0e7ff;
+            color: #312e81;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.2px;
+        }
+        .small-link {
+            display: inline-block;
+            margin-top: 12px;
+            font-size: 14px;
+            color: #2563eb;
+            text-decoration: none;
+        }
+        .small-link:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <main class="card">
+        <div style="display:flex; justify-content: space-between; align-items: center;">
+            <h1>登入控制台</h1>
+            <span class="tag">Beta</span>
+        </div>
+        <p class="subtitle">使用既有帳號登入管理 OCR 與金鑰，新增頁面不會影響 API 呼叫。</p>
+        <form id="loginForm">
+            <label>
+                <span>帳號</span>
+                <input type="text" id="username" name="username" autocomplete="username" placeholder="輸入電子郵件或帳號" required>
+            </label>
+            <label>
+                <span>密碼</span>
+                <input type="password" id="password" name="password" autocomplete="current-password" placeholder="輸入密碼" required>
+            </label>
+            <div class="actions">
+                <button type="submit" class="btn-primary">登入</button>
+                <button type="reset" class="btn-secondary">清除</button>
+            </div>
+            <div class="status" id="loginStatus"></div>
+        </form>
+        <div class="meta">
+            <strong>API 健康檢查</strong>
+            <p style="margin:6px 0 10px;">點擊下方按鈕以 GET /api/app-keys 確認登入頁面不影響原有接口。</p>
+            <button type="button" class="btn-secondary" id="probeApiBtn">測試 API</button>
+            <div class="status" id="apiStatus"></div>
+        </div>
+        <a class="small-link" href="/">返回首頁</a>
+    </main>
+    <script>
+        const loginForm = document.getElementById('loginForm');
+        const loginStatus = document.getElementById('loginStatus');
+        const probeBtn = document.getElementById('probeApiBtn');
+        const apiStatus = document.getElementById('apiStatus');
+
+        loginForm.addEventListener('submit', (event) => {
+            event.preventDefault();
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value;
+            if (!username || !password) {
+                setStatus(loginStatus, '請輸入帳號與密碼。', 'error');
+                return;
+            }
+            setStatus(loginStatus, `登入流程待串接（輸入：${username}）`, 'success');
+        });
+
+        probeBtn.addEventListener('click', async () => {
+            setStatus(apiStatus, '檢查中…');
+            try {
+                const response = await fetch('/api/app-keys');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                const json = await response.json();
+                setStatus(apiStatus, `API 正常回應，取得 ${Array.isArray(json.data) ? json.data.length : 0} 筆金鑰。`, 'success');
+            } catch (err) {
+                setStatus(apiStatus, `API 呼叫失敗：${err.message}`, 'error');
+            }
+        });
+
+        function setStatus(el, text, type = '') {
+            el.textContent = text;
+            el.className = `status ${type}`.trim();
+        }
+    </script>
+</body>
+</html>

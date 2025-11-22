@@ -7,6 +7,38 @@
         body {
             font-family: Arial, sans-serif;
             margin: 20px;
+            background: #f7f7f9;
+            color: #222;
+        }
+        .top-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+            gap: 12px;
+        }
+        .top-bar .brand {
+            font-size: 20px;
+            font-weight: bold;
+            color: #1f2a44;
+        }
+        .link-button {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 12px;
+            border-radius: 8px;
+            background: #e8f0fe;
+            color: #1d4ed8;
+            text-decoration: none;
+            font-weight: 600;
+            border: 1px solid #d4ddf4;
+        }
+        .link-button:hover {
+            background: #d7e6fd;
+        }
+        h2 {
+            margin-top: 0;
         }
         #preview {
             max-width: 100%;
@@ -22,6 +54,17 @@
         #left, #right {
             flex: 1;
         }
+        .card {
+            background: #fff;
+            border-radius: 10px;
+            border: 1px solid #e1e1e8;
+            padding: 20px;
+            margin-bottom: 24px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+        }
+        .card h3 {
+            margin-top: 0;
+        }
         .result-row {
             display: flex;
             align-items: center;
@@ -36,25 +79,189 @@
             padding: 6px 10px;
             cursor: pointer;
         }
+        form label span {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+        form input, form select {
+            width: 100%;
+            padding: 8px;
+            border-radius: 6px;
+            border: 1px solid #ccc;
+        }
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 14px;
+        }
+        .form-actions {
+            margin-top: 16px;
+            display: flex;
+            gap: 10px;
+        }
+        .btn {
+            padding: 10px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        .btn-primary {
+            background: #0067c2;
+            color: #fff;
+        }
+        .btn-secondary {
+            background: #e0e0e0;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 10px;
+            border-bottom: 1px solid #eaeaea;
+            text-align: left;
+        }
+        th {
+            background: #fafafa;
+        }
+        .status-pill {
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 12px;
+            display: inline-block;
+        }
+        .status-active {
+            background: #e1f7e1;
+            color: #0a7a12;
+        }
+        .status-disabled {
+            background: #fde1e1;
+            color: #a11f1f;
+        }
+        .actions button {
+            margin-right: 6px;
+            padding: 6px 10px;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+        }
+        .message {
+            margin-top: 10px;
+            font-size: 14px;
+        }
+        .message.error {
+            color: #c62828;
+        }
+        .message.success {
+            color: #2e7d32;
+        }
+        @media (max-width: 768px) {
+            #container {
+                flex-direction: column;
+            }
+        }
     </style>
 </head>
 <body>
-    <h2>上傳護照圖片進行 MRZ OCR 辨識</h2>
-    <form id="uploadForm" enctype="multipart/form-data" method="post" action="/api/ocr">
-        <input type="file" name="image" accept="image/*" required onchange="previewImage(event)">
-        <button type="submit">上傳並辨識</button>
-    </form>
+    <div class="top-bar">
+        <div class="brand">MRZ OCR 控制台</div>
+        <a class="link-button" href="/login">切換到登入頁面</a>
+    </div>
+    <div class="card">
+        <h2>上傳護照圖片進行 MRZ OCR 辨識</h2>
+        <form id="uploadForm" enctype="multipart/form-data" method="post" action="/api/ocr">
+            <input type="file" name="image" accept="image/*" required onchange="previewImage(event)">
+            <button type="submit" class="btn btn-primary" style="margin-left:10px;">上傳並辨識</button>
+        </form>
 
-    <div id="container">
-        <div id="left">
-            <h3>圖片預覽</h3>
-            <img id="preview" src="#" alt="預覽圖片" style="display:none;">
-        </div>
-        <div id="right">
-            <h3>辨識結果</h3>
-            <div id="result"></div>
+        <div id="container">
+            <div id="left">
+                <h3>圖片預覽</h3>
+                <img id="preview" src="#" alt="預覽圖片" style="display:none;">
+            </div>
+            <div id="right">
+                <h3>辨識結果</h3>
+                <div id="result"></div>
+            </div>
         </div>
     </div>
+
+    <section class="card" id="key-management">
+        <h2>來源 App API 金鑰管理</h2>
+        <p>新增、編輯或停用不同來源 App 的金鑰，可設定永久或週期性效期，方便控管外部系統權限。</p>
+        <form id="appKeyForm">
+            <input type="hidden" id="appId">
+            <div class="form-grid">
+                <label>
+                    <span>來源名稱</span>
+                    <input type="text" id="sourceName" placeholder="例如：合作夥伴 A" required>
+                </label>
+                <label>
+                    <span>App 名稱</span>
+                    <input type="text" id="appName" placeholder="例如：iOS App" required>
+                </label>
+                <label>
+                    <span>API 金鑰</span>
+                    <div style="display:flex; gap:8px;">
+                        <input type="text" id="apiKey" placeholder="可自訂或按下方按鈕產生" style="flex:1;">
+                        <button class="btn btn-secondary" type="button" id="generateKeyBtn">產生</button>
+                    </div>
+                </label>
+                <label>
+                    <span>金鑰類型</span>
+                    <select id="keyType">
+                        <option value="permanent">永久</option>
+                        <option value="periodic">週期</option>
+                    </select>
+                </label>
+                <label>
+                    <span>狀態</span>
+                    <select id="keyStatus">
+                        <option value="active">啟用</option>
+                        <option value="disabled">停用</option>
+                    </select>
+                </label>
+            </div>
+            <div class="form-grid" id="periodFields" style="margin-top:14px; display:none;">
+                <label>
+                    <span>開始日期</span>
+                    <input type="date" id="startDate">
+                </label>
+                <label>
+                    <span>結束日期</span>
+                    <input type="date" id="endDate">
+                </label>
+            </div>
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">儲存設定</button>
+                <button type="button" id="resetAppForm" class="btn btn-secondary">清除表單</button>
+            </div>
+            <div class="message" id="appFormMessage"></div>
+        </form>
+
+        <div class="card" style="margin-top:20px;">
+            <h3>來源金鑰清單</h3>
+            <div style="overflow-x:auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>來源</th>
+                            <th>App</th>
+                            <th>金鑰</th>
+                            <th>類型 / 期限</th>
+                            <th>狀態</th>
+                            <th>更新時間</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="appKeyTableBody">
+                        <tr><td colspan="7" style="text-align:center;">尚無資料</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
 
     <script>
         function previewImage(event) {
@@ -101,7 +308,7 @@
             fields.forEach(({ key, label }, index) => {
                 const row = document.createElement('div');
                 row.className = 'result-row';
-    
+
                 const labelEl = document.createElement('label');
                 labelEl.textContent = label + '：';
                 labelEl.style.width = '100px';
@@ -123,7 +330,193 @@
                 resultDiv.appendChild(row);
             });
         };
+
+        // ====== 金鑰管理 ======
+        const keyTypeSelect = document.getElementById('keyType');
+        const periodFields = document.getElementById('periodFields');
+        const startDateInput = document.getElementById('startDate');
+        const endDateInput = document.getElementById('endDate');
+        const appKeyForm = document.getElementById('appKeyForm');
+        const appIdInput = document.getElementById('appId');
+        const sourceInput = document.getElementById('sourceName');
+        const appNameInput = document.getElementById('appName');
+        const apiKeyInput = document.getElementById('apiKey');
+        const statusSelect = document.getElementById('keyStatus');
+        const messageBox = document.getElementById('appFormMessage');
+        const tableBody = document.getElementById('appKeyTableBody');
+        const generateKeyBtn = document.getElementById('generateKeyBtn');
+        let cachedKeys = [];
+
+        function togglePeriodFields() {
+            if (keyTypeSelect.value === 'periodic') {
+                periodFields.style.display = 'grid';
+            } else {
+                periodFields.style.display = 'none';
+                startDateInput.value = '';
+                endDateInput.value = '';
+            }
+        }
+        keyTypeSelect.addEventListener('change', togglePeriodFields);
+        togglePeriodFields();
+
+        function setMessage(message, type = 'success') {
+            messageBox.textContent = message;
+            messageBox.className = `message ${type}`;
+        }
+
+        function resetForm(showMessage = true) {
+            appIdInput.value = '';
+            sourceInput.value = '';
+            appNameInput.value = '';
+            apiKeyInput.value = '';
+            statusSelect.value = 'active';
+            keyTypeSelect.value = 'permanent';
+            startDateInput.value = '';
+            endDateInput.value = '';
+            togglePeriodFields();
+            if (showMessage) {
+                setMessage('表單已清除，準備新增金鑰。', 'success');
+            }
+        }
+        document.getElementById('resetAppForm').addEventListener('click', resetForm);
+
+        async function fetchAppKeys() {
+            const res = await fetch('/api/app-keys');
+            const json = await res.json();
+            cachedKeys = json.data || [];
+            renderTable(cachedKeys);
+        }
+
+        function renderTable(appKeys) {
+            tableBody.innerHTML = '';
+            if (!appKeys.length) {
+                const row = document.createElement('tr');
+                const cell = document.createElement('td');
+                cell.colSpan = 7;
+                cell.style.textAlign = 'center';
+                cell.textContent = '尚未建立任何金鑰';
+                row.appendChild(cell);
+                tableBody.appendChild(row);
+                return;
+            }
+
+            appKeys.forEach(app => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${app.source_name}</td>
+                    <td>${app.app_name}</td>
+                    <td style="font-family:monospace;">${app.api_key}</td>
+                    <td>${formatTypeInfo(app)}</td>
+                    <td><span class="status-pill ${app.status === 'active' ? 'status-active' : 'status-disabled'}">${app.status === 'active' ? '啟用' : '停用'}</span></td>
+                    <td>${formatDate(app.updated_at)}</td>
+                    <td class="actions">
+                        <button type="button" onclick="editAppKey('${app.id}')">編輯</button>
+                        <button type="button" onclick="toggleAppStatus('${app.id}', '${app.status === 'active' ? 'disabled' : 'active'}')">${app.status === 'active' ? '停用' : '啟用'}</button>
+                    </td>
+                `;
+                tableBody.appendChild(row);
+            });
+        }
+
+        window.editAppKey = function(id) {
+            const target = cachedKeys.find(item => item.id === id);
+            if (!target) {
+                setMessage('找不到要編輯的金鑰', 'error');
+                return;
+            }
+            appIdInput.value = target.id;
+            sourceInput.value = target.source_name;
+            appNameInput.value = target.app_name;
+            apiKeyInput.value = target.api_key;
+            statusSelect.value = target.status;
+            keyTypeSelect.value = target.key_type;
+            startDateInput.value = target.start_date || '';
+            endDateInput.value = target.end_date || '';
+            togglePeriodFields();
+            setMessage('已載入金鑰，可開始編輯。', 'success');
+        }
+
+        window.toggleAppStatus = async function(id, status) {
+            const res = await fetch(`/api/app-keys/${id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status })
+            });
+            const json = await res.json();
+            if (json.status === 'success') {
+                setMessage('狀態已更新。', 'success');
+                fetchAppKeys();
+            } else {
+                setMessage(json.message || '更新狀態失敗', 'error');
+            }
+        }
+
+        function formatTypeInfo(app) {
+            if (app.key_type === 'permanent') {
+                return '永久';
+            }
+            if (app.start_date && app.end_date) {
+                return `週期：${app.start_date} ~ ${app.end_date}`;
+            }
+            return '週期設定未完成';
+        }
+
+        function formatDate(dateString) {
+            if (!dateString) return '-';
+            const date = new Date(dateString);
+            return date.toLocaleString('zh-TW');
+        }
+
+        generateKeyBtn.addEventListener('click', async () => {
+            const res = await fetch('/api/app-keys/generate');
+            const json = await res.json();
+            if (json.status === 'success') {
+                apiKeyInput.value = json.data.api_key;
+                setMessage('已產生隨機金鑰。', 'success');
+            } else {
+                setMessage('金鑰產生失敗', 'error');
+            }
+        });
+
+        appKeyForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const payload = {
+                source_name: sourceInput.value.trim(),
+                app_name: appNameInput.value.trim(),
+                api_key: apiKeyInput.value.trim(),
+                key_type: keyTypeSelect.value,
+                status: statusSelect.value
+            };
+            if (payload.key_type === 'periodic') {
+                payload.start_date = startDateInput.value;
+                payload.end_date = endDateInput.value;
+            }
+
+            if (payload.key_type === 'periodic' && (!payload.start_date || !payload.end_date)) {
+                setMessage('請輸入週期金鑰的起訖日期。', 'error');
+                return;
+            }
+
+            const appId = appIdInput.value;
+            const url = appId ? `/api/app-keys/${appId}` : '/api/app-keys';
+            const method = appId ? 'PUT' : 'POST';
+            const res = await fetch(url, {
+                method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const json = await res.json();
+            if (json.status === 'success') {
+                setMessage(appId ? '金鑰已更新。' : '已新增金鑰。', 'success');
+                resetForm(false);
+                fetchAppKeys();
+            } else {
+                setMessage(json.message || '儲存失敗，請稍後再試。', 'error');
+            }
+        });
+
+        fetchAppKeys();
     </script>
-    
+
 </body>
 </html>
