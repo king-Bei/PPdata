@@ -1,0 +1,28 @@
+steps:
+  # 1. 執行 Docker 建構，指定子目錄中的 Dockerfile
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'build', 
+      '-t', 'asia-east2-docker.pkg.dev/plucky-ripsaw-434010-b9/cloud-run-source-deploy/king-bei-ppdata/ppocr:latest',
+      '-f', 'apippno/Dockerfile',
+      'apippno'
+    ]
+
+  # 2. 將映像檔推送到 Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'asia-east2-docker.pkg.dev/plucky-ripsaw-434010-b9/cloud-run-source-deploy/king-bei-ppdata/ppocr:latest']
+
+  # 3. 部署到 Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args: [
+      'run', 'deploy', 'ppocr',
+      '--image', 'asia-east2-docker.pkg.dev/plucky-ripsaw-434010-b9/cloud-run-source-deploy/king-bei-ppdata/ppocr:latest',
+      '--region', 'asia-east2',
+      '--platform', 'managed',
+      '--port', '5002',
+      '--allow-unauthenticated'
+    ]
+
+images:
+  - 'asia-east2-docker.pkg.dev/plucky-ripsaw-434010-b9/cloud-run-source-deploy/king-bei-ppdata/ppocr:latest'
