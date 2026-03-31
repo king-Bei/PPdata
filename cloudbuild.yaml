@@ -1,5 +1,5 @@
 steps:
-  # 1. 執行 Docker 建構，現在 Dockerfile 就在根目錄
+  # 1. 執行 Docker 建構
   - name: 'gcr.io/cloud-builders/docker'
     args: [
       'build', 
@@ -23,6 +23,10 @@ steps:
       '--port', '5002',
       '--allow-unauthenticated'
     ]
+
+# 解決自定義服務帳號的日誌儲存問題
+options:
+  logging: CLOUD_LOGGING_ONLY
 
 images:
   - 'asia-east2-docker.pkg.dev/plucky-ripsaw-434010-b9/cloud-run-source-deploy/king-bei-ppdata/ppocr:latest'
