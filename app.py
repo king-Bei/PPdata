@@ -357,6 +357,8 @@ def detect_mrz_region(image):
     gradX = cv2.morphologyEx(gradX, cv2.MORPH_CLOSE, kernel)
     thresh = cv2.threshold(gradX, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
 
+    h, w = gray.shape
+
     # 4. 再次進行閉合與腐蝕，減少雜訊
     # 動態決定大核的大小，適應不同解析度
     k_w = int(w * 0.05) if w > 1000 else 21
@@ -368,7 +370,6 @@ def detect_mrz_region(image):
     # 5. 尋找輪廓
     cnts, _ = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
-    h, w = gray.shape
     candidates = []
     relevant_cnts = []
     
