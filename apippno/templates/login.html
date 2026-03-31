@@ -2,190 +2,273 @@
 <html lang="zh-Hant">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>登入 - MRZ OCR 控制台</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=Noto+Sans+TC:wght@300;400;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            color-scheme: light;
+            --primary: #6366f1;
+            --primary-hover: #4f46e5;
+            --bg-glass: rgba(255, 255, 255, 0.7);
+            --border-glass: rgba(255, 255, 255, 0.3);
+            --text-main: #1e293b;
+            --text-sub: #64748b;
         }
-        body {
-            font-family: "Noto Sans TC", Arial, sans-serif;
-            background: #f5f6fa;
+
+        * {
+            box-sizing: border-box;
             margin: 0;
             padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', 'Noto Sans TC', sans-serif;
+            height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
-            min-height: 100vh;
-            color: #222;
+            background: url('/static/images/login-bg.png') no-repeat center center fixed;
+            background-size: cover;
+            overflow: hidden;
         }
-        .card {
-            background: #fff;
-            border-radius: 14px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
-            max-width: 420px;
+
+        body::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: radial-gradient(circle at center, transparent 0%, rgba(0,0,0,0.2) 100%);
+            z-index: 0;
+        }
+
+        .login-container {
+            position: relative;
+            z-index: 1;
             width: 100%;
-            padding: 32px;
-            border: 1px solid #e5e7eb;
+            max-width: 440px;
+            padding: 20px;
+            animation: fadeIn 0.8s ease-out;
         }
-        h1 {
-            margin: 0 0 8px;
-            font-size: 24px;
-            letter-spacing: 0.3px;
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
         }
-        p.subtitle {
-            margin: 0 0 24px;
-            color: #4b5563;
+
+        .glass-card {
+            background: var(--bg-glass);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-radius: 24px;
+            border: 1px solid var(--border-glass);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.15);
+            padding: 48px 40px;
+            text-align: center;
         }
-        label {
-            display: block;
-            margin-bottom: 18px;
+
+        .logo-area {
+            margin-bottom: 32px;
         }
-        label span {
-            display: block;
-            font-weight: 600;
-            margin-bottom: 6px;
-            color: #374151;
-        }
-        input[type="text"],
-        input[type="password"] {
-            width: 100%;
-            padding: 10px 12px;
-            border-radius: 10px;
-            border: 1px solid #d1d5db;
-            font-size: 15px;
-            transition: border-color 0.2s ease, box-shadow 0.2s ease;
-        }
-        input:focus {
-            outline: none;
-            border-color: #2563eb;
-            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
-        }
-        .actions {
-            display: flex;
-            gap: 12px;
-            align-items: center;
-        }
-        button {
-            border: none;
-            padding: 10px 16px;
-            border-radius: 10px;
-            cursor: pointer;
-            font-weight: 600;
-            font-size: 15px;
-        }
-        .btn-primary {
-            background: linear-gradient(120deg, #2563eb, #1d4ed8);
-            color: #fff;
-        }
-        .btn-secondary {
-            background: #e5e7eb;
-            color: #111827;
-        }
-        .meta {
-            margin-top: 20px;
-            padding: 14px;
-            background: #f9fafb;
-            border-radius: 12px;
-            border: 1px solid #e5e7eb;
-            color: #374151;
-            font-size: 14px;
-        }
-        .meta strong {
-            color: #111827;
-        }
-        .status {
-            margin-top: 10px;
-            font-size: 14px;
-        }
-        .status.error { color: #b91c1c; }
-        .status.success { color: #166534; }
-        .tag {
-            display: inline-block;
-            padding: 4px 10px;
-            border-radius: 999px;
-            background: #e0e7ff;
-            color: #312e81;
-            font-size: 12px;
+
+        .logo-area h1 {
+            font-size: 28px;
             font-weight: 700;
-            letter-spacing: 0.2px;
+            color: var(--text-main);
+            letter-spacing: -0.5px;
+            margin-bottom: 8px;
         }
-        .small-link {
-            display: inline-block;
-            margin-top: 12px;
+
+        .logo-area p {
+            color: var(--text-sub);
+            font-size: 15px;
+        }
+
+        .input-group {
+            text-align: left;
+            margin-bottom: 24px;
+        }
+
+        .input-group label {
+            display: block;
             font-size: 14px;
-            color: #2563eb;
-            text-decoration: none;
+            font-weight: 600;
+            color: var(--text-main);
+            margin-bottom: 8px;
+            margin-left: 4px;
         }
-        .small-link:hover {
+
+        .input-wrapper {
+            position: relative;
+        }
+
+        .input-wrapper input {
+            width: 100%;
+            padding: 14px 16px;
+            border-radius: 12px;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            background: rgba(255, 255, 255, 0.5);
+            font-size: 16px;
+            transition: all 0.3s ease;
+            outline: none;
+        }
+
+        .input-wrapper input:focus {
+            border-color: var(--primary);
+            background: white;
+            box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1);
+        }
+
+        .btn-login {
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 12px;
+            background: var(--primary);
+            color: white;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+            margin-top: 8px;
+        }
+
+        .btn-login:hover {
+            background: var(--primary-hover);
+            transform: translateY(-1px);
+            box-shadow: 0 6px 16px rgba(99, 102, 241, 0.4);
+        }
+
+        .btn-login:active {
+            transform: translateY(0);
+        }
+
+        .footer-links {
+            margin-top: 24px;
+            font-size: 14px;
+        }
+
+        .footer-links a {
+            color: var(--primary);
+            text-decoration: none;
+            font-weight: 500;
+            transition: opacity 0.2s;
+        }
+
+        .footer-links a:hover {
+            opacity: 0.8;
             text-decoration: underline;
         }
+
+        #loginStatus {
+            margin-top: 16px;
+            font-size: 14px;
+            min-height: 20px;
+        }
+
+        .status-error { color: #ef4444; }
+        .status-success { color: #10b981; }
+
+        /* Loading spinner */
+        .spinner {
+            display: none;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+            margin: 0 auto;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading .btn-text { display: none; }
+        .loading .spinner { display: block; }
     </style>
 </head>
 <body>
-    <main class="card">
-        <div style="display:flex; justify-content: space-between; align-items: center;">
-            <h1>登入控制台</h1>
-            <span class="tag">Beta</span>
-        </div>
-        <p class="subtitle">使用既有帳號登入管理 OCR 與金鑰，新增頁面不會影響 API 呼叫。</p>
-        <form id="loginForm">
-            <label>
-                <span>帳號</span>
-                <input type="text" id="username" name="username" autocomplete="username" placeholder="輸入電子郵件或帳號" required>
-            </label>
-            <label>
-                <span>密碼</span>
-                <input type="password" id="password" name="password" autocomplete="current-password" placeholder="輸入密碼" required>
-            </label>
-            <div class="actions">
-                <button type="submit" class="btn-primary">登入</button>
-                <button type="reset" class="btn-secondary">清除</button>
+    <div class="login-container">
+        <div class="glass-card">
+            <div class="logo-area">
+                <h1>MRZ OCR 控制台</h1>
+                <p>專業護照辨識與金鑰管理系統</p>
             </div>
-            <div class="status" id="loginStatus"></div>
-        </form>
-        <div class="meta">
-            <strong>API 健康檢查</strong>
-            <p style="margin:6px 0 10px;">點擊下方按鈕以 GET /api/app-keys 確認登入頁面不影響原有接口。</p>
-            <button type="button" class="btn-secondary" id="probeApiBtn">測試 API</button>
-            <div class="status" id="apiStatus"></div>
+            
+            <form id="loginForm">
+                <div class="input-group">
+                    <label for="username">帳號</label>
+                    <div class="input-wrapper">
+                        <input type="text" id="username" placeholder="請輸入帳號" required autocomplete="username">
+                    </div>
+                </div>
+                
+                <div class="input-group">
+                    <label for="password">密碼</label>
+                    <div class="input-wrapper">
+                        <input type="password" id="password" placeholder="請輸入密碼" required autocomplete="current-password">
+                    </div>
+                </div>
+                
+                <button type="submit" class="btn-login" id="loginBtn">
+                    <span class="btn-text">登入系統</span>
+                    <div class="spinner"></div>
+                </button>
+            </form>
+            
+            <div id="loginStatus"></div>
+            
+            <div class="footer-links">
+                <a href="/">返回首頁</a>
+            </div>
         </div>
-        <a class="small-link" href="/">返回首頁</a>
-    </main>
+    </div>
+
     <script>
         const loginForm = document.getElementById('loginForm');
+        const loginBtn = document.getElementById('loginBtn');
         const loginStatus = document.getElementById('loginStatus');
-        const probeBtn = document.getElementById('probeApiBtn');
-        const apiStatus = document.getElementById('apiStatus');
 
-        loginForm.addEventListener('submit', (event) => {
-            event.preventDefault();
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
             const username = document.getElementById('username').value.trim();
             const password = document.getElementById('password').value;
-            if (!username || !password) {
-                setStatus(loginStatus, '請輸入帳號與密碼。', 'error');
-                return;
-            }
-            setStatus(loginStatus, `登入流程待串接（輸入：${username}）`, 'success');
-        });
-
-        probeBtn.addEventListener('click', async () => {
-            setStatus(apiStatus, '檢查中…');
+            
+            // Set loading state
+            loginBtn.classList.add('loading');
+            loginBtn.disabled = true;
+            loginStatus.textContent = '';
+            
             try {
-                const response = await fetch('/api/app-keys');
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}`);
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    loginStatus.className = 'status-success';
+                    loginStatus.textContent = '登入成功，正在跳轉...';
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 1000);
+                } else {
+                    loginStatus.className = 'status-error';
+                    loginStatus.textContent = result.message || '登入失敗';
+                    loginBtn.classList.remove('loading');
+                    loginBtn.disabled = false;
                 }
-                const json = await response.json();
-                setStatus(apiStatus, `API 正常回應，取得 ${Array.isArray(json.data) ? json.data.length : 0} 筆金鑰。`, 'success');
             } catch (err) {
-                setStatus(apiStatus, `API 呼叫失敗：${err.message}`, 'error');
+                loginStatus.className = 'status-error';
+                loginStatus.textContent = '伺服器連線失敗';
+                loginBtn.classList.remove('loading');
+                loginBtn.disabled = false;
             }
         });
-
-        function setStatus(el, text, type = '') {
-            el.textContent = text;
-            el.className = `status ${type}`.trim();
-        }
     </script>
 </body>
 </html>

@@ -16,6 +16,7 @@ from uuid import uuid4
 from datetime import datetime, timezone
 
 app = Flask(__name__)
+app.secret_key = secrets.token_hex(24)  # For session support
 CORS(app, origins=["https://jollify.voyage.com.tw:8443"])  # 新增
 
 # 設定 log 檔案
@@ -26,6 +27,11 @@ logging.basicConfig(level=logging.INFO)
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 DEFAULT_TESSDATA_DIR = os.path.join(BASE_DIR, "tessdata")
 APP_KEYS_FILE = os.path.join(BASE_DIR, "app_keys.json")
+
+# 模擬使用者資料（實際環境應使用資料庫與 Hash 密碼）
+USERS = {
+    "admin": "admin123"
+}
 
 
 def _dedupe_preserve_order(items):
@@ -132,6 +138,10 @@ def validate_key_payload(payload):
 
 @app.route('/')
 def home():
+    from flask import session, redirect, url_for
+    if 'user' not in session:
+        logging.info("🚶 未登入，重導向至登入頁面")
+        return redirect(url_for('login_page'))
     logging.info("📢 API 首頁被訪問")
     return render_template('index.html')
 
@@ -140,6 +150,29 @@ def home():
 def login_page():
     logging.info("🔐 登入頁面被訪問")
     return render_template('login.html')
+
+
+@app.route('/api/login', methods=['POST'])
+def api_login():
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+
+    if USERS.get(username) == password:
+        from flask import session
+        session['user'] = username
+        logging.info(f"✅ 使用者 {username} 登入成功")
+        return jsonify({'status': 'success', 'message': '登入成功'})
+    
+    logging.warning(f"❌ 使用者 {username} 登入失敗")
+    return jsonify({'status': 'error', 'message': '帳號或密碼錯誤'}), 401
+
+
+@app.route('/api/logout', methods=['POST'])
+def api_logout():
+    from flask import session
+    session.pop('user', None)
+    return jsonify({'status': 'success', 'message': '已登出'})
 
 
 @app.route('/api/app-keys', methods=['GET'])
@@ -301,42 +334,68 @@ def ocr_in_memory():
 
 def detect_mrz_region(image):
     """
-    使用 OpenCV 自動偵測 MRZ 區域
-    :param image: PIL Image
-    :return: PIL Image (MRZ 區域)
+    使用 OpenCV 形態學運算優化 MRZ 區域偵測
     """
-    # 轉成 OpenCV 格式
     cv_img = np.array(image)
     if cv_img.ndim == 3:
-        cv_img = cv2.cvtColor(cv_img, cv2.COLOR_RGB2GRAY)
-    # 增強對比
-    cv_img = cv2.equalizeHist(cv_img)
-    # 二值化
-    _, thresh = cv2.threshold(cv_img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    # 邊緣偵測
-    edges = cv2.Canny(thresh, 100, 200)
-    # 膨脹讓線條更明顯
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 3))
-    dilated = cv2.dilate(edges, kernel, iterations=2)
-    # 找輪廓
-    contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    h, w = cv_img.shape
-    mrz_candidate = None
-    for cnt in contours:
-        x, y, cw, ch = cv2.boundingRect(cnt)
-        aspect_ratio = cw / ch
-        # MRZ 通常很寬很扁，且在下方
-        if aspect_ratio > 5 and ch > h * 0.05 and y > h * 0.5:
-            if mrz_candidate is None or ch * cw > mrz_candidate[2] * mrz_candidate[3]:
-                mrz_candidate = (x, y, cw, ch)
-    if mrz_candidate:
-        x, y, cw, ch = mrz_candidate
-        mrz_img = cv_img[y:y+ch, x:x+cw]
-        return Image.fromarray(mrz_img)
+        gray = cv2.cvtColor(cv_img, cv2.COLOR_RGB2GRAY)
     else:
-        # 找不到就 fallback 用下方 25%
-        width, height = image.size
-        return image.crop((0, int(height * 0.75), width, height))
+        gray = cv_img
+
+    # 1. 使用 Blackhat 形態學運算突出黑色文字
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (13, 5))
+    blackhat = cv2.morphologyEx(gray, cv2.MORPH_BLACKHAT, kernel)
+
+    # 2. 計算梯度 (Sobel) 找出垂直邊緣
+    gradX = cv2.Sobel(blackhat, ddepth=cv2.CV_32F, dx=1, dy=0, ksize=-1)
+    gradX = np.absolute(gradX)
+    (minVal, maxVal) = (np.min(gradX), np.max(gradX))
+    gradX = (255 * ((gradX - minVal) / (maxVal - minVal))).astype("uint8")
+
+    # 3. 閉合運算填補字元間隙
+    gradX = cv2.morphologyEx(gradX, cv2.MORPH_CLOSE, kernel)
+    thresh = cv2.threshold(gradX, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
+
+    # 4. 再次進行閉合與腐蝕，減少雜訊
+    sqKernel = cv2.getStructuringElement(cv2.MORPH_RECT, (21, 21))
+    thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, sqKernel)
+    thresh = cv2.erode(thresh, None, iterations=4)
+
+    # 5. 尋找輪廓
+    cnts, _ = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    h, w = gray.shape
+    candidates = []
+    for c in cnts:
+        (x, y, cw, ch) = cv2.boundingRect(c)
+        ar = cw / float(ch)
+        crWidth = cw / float(w)
+
+        # MRZ 通常寬度佔比 > 70%，高寬比 > 5
+        if ar > 5 and crWidth > 0.6:
+            # 偏向影像下方 (護照 MRZ 位置)
+            pX = x + (cw / 2)
+            pY = y + (ch / 2)
+            if pY > h * 0.5:
+                candidates.append((x, y, cw, ch))
+
+    if candidates:
+        # 選擇最下方的候選區域
+        candidates.sort(key=lambda b: b[1], reverse=True)
+        (x, y, cw, ch) = candidates[0]
+        
+        # 稍微放大邊界
+        p = 10
+        rx = max(0, x - p)
+        ry = max(0, y - p)
+        rw = min(w, cw + 2 * p)
+        rh = min(h, ch + 2 * p)
+        
+        return Image.fromarray(gray[ry:ry + rh, rx:rx + rw])
+    else:
+        # Fallback
+        logging.warning("⚠️ 無法精確偵測 MRZ 區域，使用預設裁剪")
+        return Image.fromarray(gray[int(h * 0.7):, :])
 
 
 def preprocess_image_pil(image):
@@ -363,33 +422,75 @@ def extract_mrz_data(text):
 
     return parse_mrz(mrz_line1, mrz_line2)
 
+def mrz_checksum(data):
+    """計算 MRZ 檢查碼 (ICAO 9303 標準)"""
+    weight = [7, 3, 1]
+    total = 0
+    for i, char in enumerate(data):
+        if '0' <= char <= '9':
+            val = ord(char) - ord('0')
+        elif 'A' <= char <= 'Z':
+            val = ord(char) - ord('A') + 10
+        elif char == '<':
+            val = 0
+        else:
+            val = 0
+        total += val * weight[i % 3]
+    return total % 10
+
 def parse_mrz(line1, line2):
     """
-    解析 MRZ 資料
+    解析 MRZ 資料並進行 Checksum 驗證
     """
     try:
-        names = line1[5:].split('<<')
-        last_name = names[0].replace('<', ' ').strip()
-        first_name = names[1].replace('<', ' ').strip()
+        # 移除非法字元
+        line1 = re.sub(r'[^A-Z0-9<]', '', line1.upper())
+        line2 = re.sub(r'[^A-Z0-9<]', '', line2.upper())
 
-        passport_number = line2[0:9].strip()
-        nationality = line2[10:13].strip()
-        birth_date = format_date(line2[13:19])
+        # 基本格式檢查
+        if len(line1) < 44 or len(line2) < 44:
+            raise ValueError("MRZ 長度不足")
+
+        names = line1[5:44].split('<<')
+        last_name = names[0].replace('<', ' ').strip()
+        first_name = names[1].replace('<', ' ').strip() if len(names) > 1 else ""
+
+        passport_number = line2[0:9].replace('<', '').strip()
+        pass_check = line2[9] # Checksum for passport number
+
+        birth_date_raw = line2[13:19]
+        birth_check = line2[19]
+
+        expiry_date_raw = line2[21:27]
+        expiry_check = line2[27]
+
+        # 驗證 Checksum
+        valid_passport = str(mrz_checksum(line2[0:9])) == pass_check
+        valid_birth = str(mrz_checksum(birth_date_raw)) == birth_check
+        valid_expiry = str(mrz_checksum(expiry_date_raw)) == expiry_check
+
+        nationality = line2[10:13].replace('<', '').strip()
         gender = 'M' if line2[20] == 'M' else 'F'
-        expiry_date = format_date(line2[21:27])
-        ID_number = line2[28:38].strip()
+        ID_number = line2[28:42].replace('<', '').strip()
 
         return {
             "last_name": last_name,
             "first_name": first_name,
             "passport_number": passport_number,
             "nationality": nationality,
-            "birth_date": birth_date,
+            "birth_date": format_date(birth_date_raw),
             "gender": gender,
-            "expiry_date": expiry_date,
-            "ID_number": ID_number
+            "expiry_date": format_date(expiry_date_raw),
+            "ID_number": ID_number,
+            "verification": {
+                "passport": valid_passport,
+                "birth_date": valid_birth,
+                "expiry_date": valid_expiry,
+                "overall": valid_passport and valid_birth and valid_expiry
+            }
         }
     except Exception as e:
+        logging.error(f"MRZ 解析失敗: {e}")
         raise ValueError(f"MRZ 解析失敗: {str(e)}")
 
 
