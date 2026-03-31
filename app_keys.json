@@ -1,1 +1,34 @@
-[]
+[
+  {
+    "id": "e1b2c3d4-f5a6-4b7c-8d9e-0f1a2b3c4d5e",
+    "source_name": "\u884c\u52d5 App",
+    "app_name": "iOS / Android Client",
+    "api_key": "ppocr_key_mobile_7a8b9c0d1e2f3g4h5i6j",
+    "key_type": "permanent",
+    "status": "active",
+    "created_at": "2026-04-01T02:27:00Z",
+    "updated_at": "2026-04-01T02:27:00Z"
+  },
+  {
+    "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+    "source_name": "\u5408\u4f5c\u5916\u90e8\u65c5\u884c\u793e",
+    "app_name": "Web Portal",
+    "api_key": "ppocr_key_partner_9z8y7x6w5v4u3t2s1r0q",
+    "key_type": "periodic",
+    "start_date": "2026-04-01",
+    "end_date": "2026-12-31",
+    "status": "active",
+    "created_at": "2026-04-01T02:27:00Z",
+    "updated_at": "2026-04-01T02:27:00Z"
+  },
+  {
+    "id": "f1a2b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b6c",
+    "source_name": "\u5167\u90e8 CRM \u7cfb\u7d71",
+    "app_name": "CRM Integration",
+    "api_key": "ppocr_key_crm_1p2o3n4m5l6k7j8i9h0g",
+    "key_type": "permanent",
+    "status": "active",
+    "created_at": "2026-04-01T02:27:00Z",
+    "updated_at": "2026-04-01T02:27:00Z"
+  }
+]
