@@ -370,40 +370,61 @@ def detect_mrz_region(image):
     
     h, w = gray.shape
     candidates = []
+    relevant_cnts = []
+    
     for c in cnts:
         (x, y, cw, ch) = cv2.boundingRect(c)
-        # MRZ 通常寬度佔比 > 50%，高寬比 > 4 (放寬以應對不同角度與切割)
+        ar = cw / float(ch)
+        crWidth = cw / float(w)
+
+        # MRZ 通常寬度佔比 > 50%，高寬比 > 4 
         if ar > 4 and crWidth > 0.5:
             # 偏向影像下方 (護照 MRZ 位置)
-            pX = x + (cw / 2)
             pY = y + (ch / 2)
-            if pY > h * 0.5:
+            if pY > h * 0.4: # 放寬到下半部 60%
                 candidates.append((x, y, cw, ch))
+                relevant_cnts.append(c)
 
-    if candidates:
-        # 取得所有候選區域的邊界，合併成一個大的 MRZ 區域
-        min_x = min([c[0] for c in candidates])
-        min_y = min([c[1] for c in candidates])
-        max_x = max([c[0] + c[2] for c in candidates])
-        max_y = max([c[1] + c[3] for c in candidates])
-        
-        cw = max_x - min_x
-        ch = max_y - min_y
-        
-        # 稍微放大邊界 (Padding)
-        p_w = int(cw * 0.05)
-        p_h = int(ch * 0.15)
-        rx = max(0, min_x - p_w)
-        ry = max(0, min_y - p_h)
-        rw = min(w - rx, cw + 2 * p_w)
-        rh = min(h - ry, ch + 2 * p_h)
-        
-        logging.info(f"📍 偵測到 {len(candidates)} 個 MRZ 區塊，合併區域: x={rx}, y={ry}, w={rw}, h={rh}")
-        return Image.fromarray(gray[ry:ry + rh, rx:rx + rw])
-    else:
-        # Fallback: 傳回下方 40% 的區域，通常 MRZ 在這
+    if not candidates:
         logging.warning("⚠️ 無法精確偵測 MRZ 區域，使用預設比例裁剪 (下方 40%)")
         return Image.fromarray(gray[int(h * 0.6):, :])
+
+    # 使用所有相關輪廓來計算帶角度的最小外接矩形 (minAreaRect)
+    all_points = np.vstack(relevant_cnts)
+    rect = cv2.minAreaRect(all_points)
+    center, size, angle = rect
+    
+    # 計算角度 (OpenCV minAreaRect 的角度行為在不同版本可能不同)
+    # 我們目標是把長度較長的一邊轉成水平
+    if size[0] < size[1]:
+        angle += 90
+        size = (size[1], size[0])
+
+    # 執行旋轉校正
+    M = cv2.getRotationMatrix2D(center, angle, 1.0)
+    rotated = cv2.warpAffine(gray, M, (w, h), flags=cv2.INTER_CUBIC)
+    
+    # 在校正後的圖片中進行剪裁
+    # 稍微放大 size 以包含 Padding
+    cw, ch = size
+    cw = int(cw * 1.05)
+    ch = int(ch * 1.3) # 高度多給一點，確保兩行都在
+    
+    # 算出新的中心座標在旋轉後可能不變，直接從 center 裁切
+    cx, cy = center
+    x1 = max(0, int(cx - cw/2))
+    y1 = max(0, int(cy - ch/2))
+    x2 = min(w, int(cx + cw/2))
+    y2 = min(h, int(cy + ch/2))
+    
+    cropped = rotated[y1:y2, x1:x2]
+    logging.info(f"📐 執行旋轉剪裁: 角度 {angle:.2f}, 區域 ({x1},{y1}) -> ({x2},{y2})")
+    
+    # 如果裁切後太小， fallback
+    if cropped.size == 0 or cropped.shape[0] < 20:
+        return Image.fromarray(gray[int(h * 0.6):, :])
+
+    return Image.fromarray(cropped)
 
 
 def preprocess_image_pil(image):

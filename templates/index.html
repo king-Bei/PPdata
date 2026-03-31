@@ -1,10 +1,13 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MRZ OCR 控制台 - 管理中心</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=Noto+Sans+TC:wght@300;400;700&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=Noto+Sans+TC:wght@300;400;700&display=swap"
+        rel="stylesheet">
     <style>
         :root {
             --primary: #6366f1;
@@ -19,7 +22,11 @@
             --warning: #f59e0b;
         }
 
-        * { box-sizing: border-box; margin: 0; padding: 0; }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
 
         body {
             font-family: 'Inter', 'Noto Sans TC', sans-serif;
@@ -87,14 +94,16 @@
         }
 
         @media (max-width: 1024px) {
-            .grid-layout { grid-template-columns: 1fr; }
+            .grid-layout {
+                grid-template-columns: 1fr;
+            }
         }
 
         .card {
             background: var(--card-bg);
             border-radius: 16px;
             border: 1px solid var(--border);
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
             padding: 24px;
             margin-bottom: 32px;
         }
@@ -122,14 +131,18 @@
             position: relative;
         }
 
-        .upload-zone:hover, .upload-zone.dragover {
+        .upload-zone:hover,
+        .upload-zone.dragover {
             border-color: var(--primary);
             background: #f5f3ff;
         }
 
         .upload-zone input {
             position: absolute;
-            top: 0; left: 0; width: 100%; height: 100%;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
             opacity: 0;
             cursor: pointer;
         }
@@ -139,7 +152,7 @@
             border-radius: 8px;
             margin-top: 16px;
             display: none;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
         }
 
         /* Results Display */
@@ -179,7 +192,9 @@
             font-size: 13px;
         }
 
-        .btn-copy:hover { background: #f1f5f9; }
+        .btn-copy:hover {
+            background: #f1f5f9;
+        }
 
         .verif-badge {
             display: inline-flex;
@@ -191,8 +206,15 @@
             font-weight: 700;
         }
 
-        .verif-pass { background: #d1fae5; color: #065f46; }
-        .verif-fail { background: #fee2e2; color: #991b1b; }
+        .verif-pass {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .verif-fail {
+            background: #fee2e2;
+            color: #991b1b;
+        }
 
         /* Key Management Table */
         .table-container {
@@ -228,7 +250,9 @@
             background: white;
         }
 
-        .btn-action:hover { background: #f1f5f9; }
+        .btn-action:hover {
+            background: #f1f5f9;
+        }
 
         /* Forms */
         .form-grid {
@@ -244,7 +268,8 @@
             margin-bottom: 8px;
         }
 
-        .form-group input, .form-group select {
+        .form-group input,
+        .form-group select {
             width: 100%;
             padding: 10px;
             border-radius: 8px;
@@ -263,20 +288,36 @@
             transition: all 0.2s;
         }
 
-        .btn-primary:hover { background: var(--primary-hover); transform: translateY(-1px); }
+        .btn-primary:hover {
+            background: var(--primary-hover);
+            transform: translateY(-1px);
+        }
 
         .status-dot {
-            height: 8px; width: 8px; border-radius: 50%; display: inline-block; margin-right: 6px;
+            height: 8px;
+            width: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 6px;
         }
-        .status-active { background: var(--success); }
-        .status-inactive { background: var(--error); }
 
+        .status-active {
+            background: var(--success);
+        }
+
+        .status-inactive {
+            background: var(--error);
+        }
     </style>
 </head>
+
 <body>
     <header>
         <div class="brand">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
             MRZ OCR 控制台
         </div>
         <div class="user-nav">
@@ -295,13 +336,21 @@
                     </div>
                     <form id="uploadForm">
                         <div class="upload-zone" id="dropZone">
-                            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--text-sub)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom: 12px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--text-sub)"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                                style="margin-bottom: 12px;">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                <polyline points="17 8 12 3 7 8" />
+                                <line x1="12" y1="3" x2="12" y2="15" />
+                            </svg>
                             <p style="font-weight: 600; color: var(--text-main);">點擊或拖放護照圖片至此</p>
-                            <p style="font-size: 13px; color: var(--text-sub); margin-top: 4px;">支援 JPG, PNG, WEBP (自動裁剪 MRZ 區域)</p>
+                            <p style="font-size: 13px; color: var(--text-sub); margin-top: 4px;">支援 JPG, PNG, WEBP (自動裁剪
+                                MRZ 區域)</p>
                             <input type="file" name="image" id="fileInput" accept="image/*" multiple required>
                         </div>
                         <img id="preview" class="preview-img">
-                        <button type="submit" class="btn-primary" style="width: 100%; margin-top: 20px;" id="scanBtn">開始辨識並驗證</button>
+                        <button type="submit" class="btn-primary" style="width: 100%; margin-top: 20px;"
+                            id="scanBtn">開始辨識並驗證</button>
                     </form>
                 </div>
 
@@ -380,7 +429,8 @@
                         </div>
                         <div style="margin-top: 24px; display: flex; gap: 12px;">
                             <button type="submit" class="btn-primary">儲存 API 設定</button>
-                            <button type="button" id="resetFormBtn" class="btn-logout" style="border-radius: 10px;">清除</button>
+                            <button type="button" id="resetFormBtn" class="btn-logout"
+                                style="border-radius: 10px;">清除</button>
                         </div>
                     </form>
                 </div>
@@ -438,7 +488,7 @@
 
             scanBtn.disabled = true;
             scanBtn.textContent = `處理中 (0/${files.length})...`;
-            
+
             const batchResultCard = document.getElementById('batchResultCard');
             const batchResultBody = document.getElementById('batchResultBody');
             batchResultBody.innerHTML = '';
@@ -448,14 +498,14 @@
             for (let i = 0; i < files.length; i++) {
                 const file = files[i];
                 scanBtn.textContent = `處理中 (${i + 1}/${files.length})...`;
-                
+
                 const formData = new FormData();
                 formData.append('image', file);
 
                 try {
                     const res = await fetch('/api/ocr', { method: 'POST', body: formData });
                     const json = await res.json();
-                    
+
                     const rowData = {
                         filename: file.filename || file.name,
                         status: json.status,
@@ -479,7 +529,7 @@
         function appendBatchRow(res, index) {
             const body = document.getElementById('batchResultBody');
             const tr = document.createElement('tr');
-            
+
             if (res.status === 'success') {
                 const d = res.data;
                 const overall = d.verification.overall;
@@ -514,7 +564,7 @@
             const container = document.getElementById('resultContent');
             const overallVerif = document.getElementById('overallVerif');
             container.innerHTML = '';
-            
+
             const fields = [
                 { id: 'passport_number', label: '護照號碼', value: data.passport_number, valid: data.verification.passport },
                 { id: 'ID_number', label: '身分證字號', value: data.ID_number },
@@ -533,7 +583,7 @@
                 if (f.valid !== undefined) {
                     badge = `<span class="verif-badge ${f.valid ? 'verif-pass' : 'verif-fail'}">${f.valid ? '✓ 驗證通過' : '✗ 格式錯誤'}</span>`;
                 }
-                
+
                 item.innerHTML = `
                     <div style="display:flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
                         <label>${f.label}</label>
@@ -547,7 +597,7 @@
                 container.appendChild(item);
             });
 
-            overallVerif.innerHTML = data.verification.overall 
+            overallVerif.innerHTML = data.verification.overall
                 ? '<span class="verif-badge verif-pass">🛡️ 完整 Checksum 驗證成功</span>'
                 : '<span class="verif-badge verif-fail">⚠️ Checksum 驗證不完全</span>';
         }
@@ -626,16 +676,16 @@
                 start_date: document.getElementById('startDate').value,
                 end_date: document.getElementById('endDate').value,
             };
-            
+
             const method = id ? 'PUT' : 'POST';
             const url = id ? `/api/app-keys/${id}` : '/api/app-keys';
-            
+
             await fetch(url, {
                 method,
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
             });
-            
+
             appKeyForm.reset();
             document.getElementById('appId').value = '';
             fetchKeys();
@@ -663,4 +713,5 @@
         fetchKeys();
     </script>
 </body>
+
 </html>
