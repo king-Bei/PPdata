@@ -78,7 +78,7 @@ def resolve_tessdata_dir():
 
 
 tessdata_dir = resolve_tessdata_dir()
-OCR_CONFIG = f'--tessdata-dir "{tessdata_dir}"'
+OCR_CONFIG = f'--tessdata-dir "{tessdata_dir}" --psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<'
 
 
 def load_app_keys():
@@ -424,6 +424,19 @@ def detect_mrz_region(image):
     if cropped.size == 0 or cropped.shape[0] < 20:
         return Image.fromarray(gray[int(h * 0.6):, :])
 
+    # --- 影像優化 ---
+    # 1. 若高度太小 (<60px)，等比例放大以符合 Tesseract 偏好的 30px 字高
+    if cropped.shape[0] < 60:
+        scale = 120.0 / max(cropped.shape[0], 1)
+        cropped = cv2.resize(cropped, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+
+    # 2. 強化對比度 (CLAHE)，平衡陰影與反光
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    cropped = clahe.apply(cropped)
+    
+    # 3. 輕微降噪
+    cropped = cv2.GaussianBlur(cropped, (3, 3), 0)
+
     return Image.fromarray(cropped)
 
 
@@ -493,6 +506,12 @@ def parse_mrz(line1, line2):
     """
     解析 MRZ 資料並進行 Checksum 驗證
     """
+    # 輔助函式：自動修正 OCR 易混淆字元
+    def fix_digits(s):
+        return s.replace('O', '0').replace('D', '0').replace('I', '1').replace('S', '5').replace('Q', '0').replace('U', '0')
+    def fix_letters(s):
+        return s.replace('0', 'O').replace('1', 'I').replace('5', 'S').replace('8', 'B')
+
     try:
         # 移除非法字元
         line1 = re.sub(r'[^A-Z0-9<]', '', line1.upper())
@@ -503,17 +522,18 @@ def parse_mrz(line1, line2):
             raise ValueError("MRZ 長度不足")
 
         names = line1[5:44].split('<<')
-        last_name = names[0].replace('<', ' ').strip()
-        first_name = names[1].replace('<', ' ').strip() if len(names) > 1 else ""
+        last_name = fix_letters(names[0].replace('<', ' ')).strip()
+        first_name = fix_letters(names[1].replace('<', ' ')).strip() if len(names) > 1 else ""
 
+        # 護照號碼可能同時有英文數字，不貿然修正全部
         passport_number = line2[0:9].replace('<', '').strip()
-        pass_check = line2[9] # Checksum for passport number
+        pass_check = fix_digits(line2[9]) # Checksum 必為數字
 
-        birth_date_raw = line2[13:19]
-        birth_check = line2[19]
+        birth_date_raw = fix_digits(line2[13:19])
+        birth_check = fix_digits(line2[19])
 
-        expiry_date_raw = line2[21:27]
-        expiry_check = line2[27]
+        expiry_date_raw = fix_digits(line2[21:27])
+        expiry_check = fix_digits(line2[27])
 
         # 驗證 Checksum
         valid_passport = str(mrz_checksum(line2[0:9])) == pass_check
