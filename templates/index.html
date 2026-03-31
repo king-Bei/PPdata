@@ -298,16 +298,38 @@
                             <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--text-sub)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom: 12px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
                             <p style="font-weight: 600; color: var(--text-main);">點擊或拖放護照圖片至此</p>
                             <p style="font-size: 13px; color: var(--text-sub); margin-top: 4px;">支援 JPG, PNG, WEBP (自動裁剪 MRZ 區域)</p>
-                            <input type="file" name="image" id="fileInput" accept="image/*" required>
+                            <input type="file" name="image" id="fileInput" accept="image/*" multiple required>
                         </div>
                         <img id="preview" class="preview-img">
                         <button type="submit" class="btn-primary" style="width: 100%; margin-top: 20px;" id="scanBtn">開始辨識並驗證</button>
                     </form>
                 </div>
 
+                <div class="card" id="batchResultCard" style="display: none;">
+                    <div class="card-header">
+                        <h3 class="card-title">批次處理結果</h3>
+                        <button class="btn-action" id="exportCsvBtn" style="display:none;">匯出 CSV</button>
+                    </div>
+                    <div class="table-container">
+                        <table id="batchResultTable">
+                            <thead>
+                                <tr>
+                                    <th>檔名</th>
+                                    <th>姓名</th>
+                                    <th>護照號碼</th>
+                                    <th>國籍</th>
+                                    <th>驗證</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="batchResultBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
                 <div class="card" id="resultCard" style="display: none;">
                     <div class="card-header">
-                        <h3 class="card-title">掃描結果</h3>
+                        <h3 class="card-title">單筆詳細資料</h3>
                         <div id="overallVerif"></div>
                     </div>
                     <div id="resultContent"></div>
@@ -407,26 +429,84 @@
             }
         });
 
+        let batchResults = [];
+
         uploadForm.onsubmit = async (e) => {
             e.preventDefault();
+            const files = fileInput.files;
+            if (files.length === 0) return;
+
             scanBtn.disabled = true;
-            scanBtn.textContent = '辨識中...';
+            scanBtn.textContent = `處理中 (0/${files.length})...`;
             
-            const formData = new FormData(uploadForm);
-            try {
-                const res = await fetch('/api/ocr', { method: 'POST', body: formData });
-                const json = await res.json();
-                if (json.status === 'success') {
-                    renderOCRResults(json.data);
-                    resultCard.style.display = 'block';
-                } else {
-                    alert('辨識失敗：' + json.message);
+            const batchResultCard = document.getElementById('batchResultCard');
+            const batchResultBody = document.getElementById('batchResultBody');
+            batchResultBody.innerHTML = '';
+            batchResultCard.style.display = 'block';
+            batchResults = [];
+
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                scanBtn.textContent = `處理中 (${i + 1}/${files.length})...`;
+                
+                const formData = new FormData();
+                formData.append('image', file);
+
+                try {
+                    const res = await fetch('/api/ocr', { method: 'POST', body: formData });
+                    const json = await res.json();
+                    
+                    const rowData = {
+                        filename: file.filename || file.name,
+                        status: json.status,
+                        data: json.data,
+                        message: json.message
+                    };
+                    batchResults.push(rowData);
+                    appendBatchRow(rowData, i);
+                } catch (err) {
+                    const errorData = { filename: file.name, status: 'error', message: '系統連線錯誤' };
+                    batchResults.push(errorData);
+                    appendBatchRow(errorData, i);
                 }
-            } catch (err) {
-                alert('系統錯誤');
-            } finally {
-                scanBtn.disabled = false;
-                scanBtn.textContent = '開始辨識並驗證';
+            }
+
+            scanBtn.disabled = false;
+            scanBtn.textContent = '批次辨識並驗證';
+            document.getElementById('exportCsvBtn').style.display = 'block';
+        };
+
+        function appendBatchRow(res, index) {
+            const body = document.getElementById('batchResultBody');
+            const tr = document.createElement('tr');
+            
+            if (res.status === 'success') {
+                const d = res.data;
+                const overall = d.verification.overall;
+                tr.innerHTML = `
+                    <td>${res.filename}</td>
+                    <td>${d.last_name} ${d.first_name}</td>
+                    <td>${d.passport_number}</td>
+                    <td>${d.nationality}</td>
+                    <td><span class="verif-badge ${overall ? 'verif-pass' : 'verif-fail'}">${overall ? '通過' : '警告'}</span></td>
+                    <td><button class="btn-action" onclick="showDetail(${index})">查看</button></td>
+                `;
+            } else {
+                tr.innerHTML = `
+                    <td>${res.filename}</td>
+                    <td colspan="4" style="color:var(--error); font-size:12px;">❌ 辨識失敗: ${res.message}</td>
+                    <td>-</td>
+                `;
+            }
+            body.appendChild(tr);
+        }
+
+        window.showDetail = (index) => {
+            const res = batchResults[index];
+            if (res && res.status === 'success') {
+                renderOCRResults(res.data);
+                resultCard.style.display = 'block';
+                resultCard.scrollIntoView({ behavior: 'smooth' });
             }
         };
 

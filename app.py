@@ -353,13 +353,17 @@ def detect_mrz_region(image):
     gradX = (255 * ((gradX - minVal) / (maxVal - minVal))).astype("uint8")
 
     # 3. 閉合運算填補字元間隙
+    sqKernel = cv2.getStructuringElement(cv2.MORPH_RECT, (21, 11)) # 針對橫向文字調優
     gradX = cv2.morphologyEx(gradX, cv2.MORPH_CLOSE, kernel)
     thresh = cv2.threshold(gradX, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
 
     # 4. 再次進行閉合與腐蝕，減少雜訊
-    sqKernel = cv2.getStructuringElement(cv2.MORPH_RECT, (21, 21))
-    thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, sqKernel)
-    thresh = cv2.erode(thresh, None, iterations=4)
+    # 動態決定大核的大小，適應不同解析度
+    k_w = int(w * 0.05) if w > 1000 else 21
+    k_h = int(h * 0.05) if h > 1000 else 21
+    bigKernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k_w, k_h))
+    thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, bigKernel)
+    thresh = cv2.erode(thresh, None, iterations=2)
 
     # 5. 尋找輪廓
     cnts, _ = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -368,11 +372,8 @@ def detect_mrz_region(image):
     candidates = []
     for c in cnts:
         (x, y, cw, ch) = cv2.boundingRect(c)
-        ar = cw / float(ch)
-        crWidth = cw / float(w)
-
-        # MRZ 通常寬度佔比 > 70%，高寬比 > 5
-        if ar > 5 and crWidth > 0.6:
+        # MRZ 通常寬度佔比 > 50%，高寬比 > 4 (放寬以應對不同角度與切割)
+        if ar > 4 and crWidth > 0.5:
             # 偏向影像下方 (護照 MRZ 位置)
             pX = x + (cw / 2)
             pY = y + (ch / 2)
@@ -380,22 +381,29 @@ def detect_mrz_region(image):
                 candidates.append((x, y, cw, ch))
 
     if candidates:
-        # 選擇最下方的候選區域
-        candidates.sort(key=lambda b: b[1], reverse=True)
-        (x, y, cw, ch) = candidates[0]
+        # 取得所有候選區域的邊界，合併成一個大的 MRZ 區域
+        min_x = min([c[0] for c in candidates])
+        min_y = min([c[1] for c in candidates])
+        max_x = max([c[0] + c[2] for c in candidates])
+        max_y = max([c[1] + c[3] for c in candidates])
         
-        # 稍微放大邊界
-        p = 10
-        rx = max(0, x - p)
-        ry = max(0, y - p)
-        rw = min(w, cw + 2 * p)
-        rh = min(h, ch + 2 * p)
+        cw = max_x - min_x
+        ch = max_y - min_y
         
+        # 稍微放大邊界 (Padding)
+        p_w = int(cw * 0.05)
+        p_h = int(ch * 0.15)
+        rx = max(0, min_x - p_w)
+        ry = max(0, min_y - p_h)
+        rw = min(w - rx, cw + 2 * p_w)
+        rh = min(h - ry, ch + 2 * p_h)
+        
+        logging.info(f"📍 偵測到 {len(candidates)} 個 MRZ 區塊，合併區域: x={rx}, y={ry}, w={rw}, h={rh}")
         return Image.fromarray(gray[ry:ry + rh, rx:rx + rw])
     else:
-        # Fallback
-        logging.warning("⚠️ 無法精確偵測 MRZ 區域，使用預設裁剪")
-        return Image.fromarray(gray[int(h * 0.7):, :])
+        # Fallback: 傳回下方 40% 的區域，通常 MRZ 在這
+        logging.warning("⚠️ 無法精確偵測 MRZ 區域，使用預設比例裁剪 (下方 40%)")
+        return Image.fromarray(gray[int(h * 0.6):, :])
 
 
 def preprocess_image_pil(image):
@@ -409,16 +417,38 @@ def preprocess_image_pil(image):
 
 def extract_mrz_data(text):
     """
-    提取 MRZ 資料並解析
+    從 OCR 結果中搜尋並提取 MRZ 資料
     """
-    lines = text.strip().split('\n')
+    # 預先清理：移除多餘空格，轉大寫，過濾非法字元（保留 A-Z, 0-9, <, \n）
+    cleaned_text = re.sub(r'[^A-Z0-9<\n]', '', text.upper())
+    lines = [line.strip() for line in cleaned_text.split('\n') if len(line.strip()) >= 30]
 
-    # 確保至少有兩行 MRZ
-    if len(lines) < 2:
-        raise ValueError("MRZ 資料不足，無法解析")
+    logging.info(f"🔍 過濾後的候選行數: {len(lines)}")
+    for i, line in enumerate(lines):
+         logging.info(f"   Line {i}: {line[:10]}... ({len(line)} chars)")
 
-    mrz_line1 = lines[-2].replace(' ', '')
-    mrz_line2 = lines[-1].replace(' ', '')
+    # 尋找最像 MRZ 的兩行（通常長度為 44，且包含多個 <）
+    mrz_candidates = []
+    for line in lines:
+        # 護照 MRZ (Type 3) 通常是 44 字元
+        if 43 <= len(line) <= 46:
+            mrz_candidates.append(line[:44])
+        # 有些情況 OCR 會把兩行接在一起或切斷，暫不處理複雜情況
+
+    if len(mrz_candidates) < 2:
+        # 嘗試寬鬆匹配：只要有兩行長度接近的
+        if len(lines) >= 2:
+            # 優先取最後兩行長度 > 30 的
+            mrz_line1 = lines[-2]
+            mrz_line2 = lines[-1]
+            logging.warning("⚠️ 未找到標準 44 字元行，使用最後兩行候選")
+        else:
+            logging.error(f"❌ 解析失敗。OCR 原始內容內容: {text}")
+            raise ValueError(f"MRZ 資料不足，無法解析。識別到的有效行數：{len(lines)}")
+    else:
+        # 取最後兩個符合 44 字元的（避免上方有干擾文字）
+        mrz_line1 = mrz_candidates[-2]
+        mrz_line2 = mrz_candidates[-1]
 
     return parse_mrz(mrz_line1, mrz_line2)
 
