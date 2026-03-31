@@ -1,11 +1,11 @@
 steps:
-  # 1. 執行 Docker 建構，指定子目錄中的 Dockerfile
+  # 1. 執行 Docker 建構，現在 Dockerfile 就在根目錄
   - name: 'gcr.io/cloud-builders/docker'
     args: [
       'build', 
       '-t', 'asia-east2-docker.pkg.dev/plucky-ripsaw-434010-b9/cloud-run-source-deploy/king-bei-ppdata/ppocr:latest',
-      '-f', 'apippno/Dockerfile',
-      'apippno'
+      '-f', 'Dockerfile',
+      '.'
     ]
 
   # 2. 將映像檔推送到 Artifact Registry
