@@ -311,7 +311,7 @@ def ocr_in_memory():
         logging.info(f"🖼️ 影像來源: {source_desc} 已成功載入")
 
         # 影像預處理
-        processed_image = preprocess_image_pil(image)
+        data_page, processed_image = preprocess_image_pil(image)
         logging.info("🔄 影像已預處理完成")
 
         # OCR 辨識
@@ -320,6 +320,9 @@ def ocr_in_memory():
 
         # 解析 MRZ 資料
         mrz_data = extract_mrz_data(detected_text)
+        
+        # 中文辨識
+        mrz_data['chinese_name'] = extract_chinese_name(data_page)
 
         return jsonify({'status': 'success', 'data': mrz_data}), 200
 
@@ -441,13 +444,105 @@ def detect_mrz_region(image):
     return Image.fromarray(cropped)
 
 
+def crop_to_data_page_via_face(image):
+    """
+    使用 OpenCV Haar Cascade 找尋人臉，並裁切掉上半部無關的頁面
+    """
+    cv_img = np.array(image)
+    if cv_img.ndim == 3:
+        gray = cv2.cvtColor(cv_img, cv2.COLOR_RGB2GRAY)
+    else:
+        gray = cv_img
+
+    # 載入 Haar Cascade 模型
+    face_cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+    face_cascade = cv2.CascadeClassifier(face_cascade_path)
+    
+    if face_cascade.empty():
+        logging.warning("⚠️ 無法載入 haarcascade_frontalface_default.xml 模型")
+        return image
+
+    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(50, 50))
+    
+    if len(faces) > 0:
+        # 取面積最大的臉
+        faces = sorted(faces, key=lambda x: x[2] * x[3], reverse=True)
+        x, y, w, h = faces[0]
+        
+        # 護照照片通常在上方，我們保留這張臉以及其下方的所有內容
+        # 往上延伸高度的 50% 避免切到頭頂
+        crop_y_start = max(0, int(y - h * 0.5))
+        logging.info(f"👤 偵測到最大人臉 (y:{y}, w:{w}, h:{h}), 裁切 Y 軸起點為 {crop_y_start}")
+        
+        # 如果人臉太靠下面，可能這張不是包含兩頁的照片，就不裁切
+        if crop_y_start < gray.shape[0] * 0.7:
+             cropped = cv_img[crop_y_start:, :]
+             return Image.fromarray(cropped)
+    
+    logging.info("👤 未偵測到適合的人臉或不需裁切，使用原圖")
+    return image
+
+
 def preprocess_image_pil(image):
     """
     使用 PIL 和 OpenCV 處理影像，提高 OCR 的辨識精度
     """
+    # 轉為灰階
     gray = ImageOps.grayscale(image)
-    mrz_region = detect_mrz_region(gray)
-    return mrz_region
+    
+    # 1. 人臉輔助裁切 (去掉可能的上方簽名頁)
+    cropped_by_face = crop_to_data_page_via_face(gray)
+    
+    # 2. 進行 MRZ 定位
+    mrz_region = detect_mrz_region(cropped_by_face)
+    return cropped_by_face, mrz_region
+
+
+def extract_chinese_name(data_page_image):
+    """
+    從護照資料頁（去掉簽名頁與下方MRZ後）提取繁體中文姓名
+    """
+    cv_img = np.array(data_page_image)
+    if cv_img.ndim == 3:
+        gray = cv2.cvtColor(cv_img, cv2.COLOR_RGB2GRAY)
+    else:
+        gray = cv_img
+
+    h, w = gray.shape[:2]
+    # 我們只取上半部 60% 來找姓名，避免跟底下的其他英文資訊混在一起
+    top_region = gray[:int(h * 0.6), :]
+    
+    # 增加對比度等簡單預處理
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    top_region = clahe.apply(top_region)
+    
+    try:
+        chi_config = f'--tessdata-dir "{tessdata_dir}" --psm 6'
+        text = pytesseract.image_to_string(Image.fromarray(top_region), lang='chi_tra', config=chi_config)
+        logging.info(f"🇹🇼 中文 OCR 結果片段：{text[:30].replace(chr(10), ' ')}...")
+        
+        lines = text.split('\n')
+        for line in lines:
+            line = line.strip()
+            line_no_space = re.sub(r'\s+', '', line)
+            
+            # 使用正則表達式尋找所有兩到四個字的純中文組合
+            match = re.search(r'姓名.*?([\u4e00-\u9fa5]{2,4})', line_no_space)
+            if match:
+                return match.group(1)
+        
+        # 如果找不到 "姓名" 關鍵字，嘗試掃描所有行找尋合適的中文字串
+        for line in lines:
+            line_no_space = re.sub(r'\s+', '', line)
+            if 2 <= len(line_no_space) <= 4 and re.match(r'^[\u4e00-\u9fa5]+$', line_no_space):
+                 if line_no_space not in ['護照', '簽證', '外交部', '姓名']:
+                     return line_no_space
+                     
+    except Exception as e:
+        logging.error(f"❌ 中文姓名 OCR 失敗: {e}")
+        
+    return ""
+
 
 
 def extract_mrz_data(text):
@@ -610,7 +705,7 @@ def ocr_in_memory_csv():
         logging.info("🖼️ 影像已成功載入")
 
         # 預處理 + OCR
-        processed_image = preprocess_image_pil(image)
+        data_page, processed_image = preprocess_image_pil(image)
         detected_text = pytesseract.image_to_string(processed_image, lang='ocrb', config=OCR_CONFIG)
         logging.info(f"✅ OCR 辨識完成，識別結果: {detected_text[:50]}...")
 
