@@ -52,13 +52,20 @@ python app.py
 - `POST /api/ocr-csv`  
   上傳圖片檔（表單欄位：`image`），OCR 結果寫入 CSV 並回傳辨識文字
 
+## 金鑰與串接指南
+
+登入管理頁後新增來源，儲存時自動產生金鑰；支援重新產生、停用與啟用。外部 OCR 呼叫須提供 `X-API-Key`，舊金鑰在重新產生後失效。週期性金鑰使用台北日期，包含起訖日。
+
+完整操作、curl／Python 範例、管理 API 與持久化設定請見 [API 串接指南](API_GUIDE.md)。管理頁亦可下載指南。
+
 ## 範例請求
 
 ```bash
-curl -F "image=@passport.jpg" http://localhost:5002/api/ocr
+curl -H "X-API-Key: $PP_OCR_API_KEY" -F "image=@passport.jpg" http://localhost:5002/api/ocr
 
 # 或傳送 Base64 字串
 curl -X POST http://localhost:5002/api/ocr \
+  -H "X-API-Key: $PP_OCR_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"image_base64": "<BASE64_DATA>"}'
 ```

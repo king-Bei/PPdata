@@ -11,3 +11,4 @@ pillow>=9.1
 pytesseract
 Werkzeug
 flask-cors
+tzdata

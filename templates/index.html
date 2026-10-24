@@ -390,40 +390,41 @@
                 <div class="card">
                     <div class="card-header">
                         <h3 class="card-title">新增 / 編輯 來源 App 金鑰</h3>
+                        <a href="/api-guide" class="btn-action">下載 API 串接指南</a>
                     </div>
                     <form id="appKeyForm">
                         <input type="hidden" id="appId">
                         <div class="form-grid">
                             <div class="form-group">
-                                <label>來源名稱</label>
+                                <label for="sourceName">來源名稱</label>
                                 <input type="text" id="sourceName" placeholder="例如：旅行社 A" required>
                             </div>
                             <div class="form-group">
-                                <label>App 名稱</label>
+                                <label for="appName">App 名稱</label>
                                 <input type="text" id="appName" placeholder="例如：iOS App" required>
                             </div>
                             <div class="form-group">
-                                <label>金鑰類型</label>
+                                <label for="keyType">金鑰類型</label>
                                 <select id="keyType">
                                     <option value="permanent">永久金鑰</option>
                                     <option value="periodic">週期性金鑰</option>
                                 </select>
                             </div>
                             <div class="form-group">
-                                <label>API 金鑰 </label>
+                                <label for="apiKey">API 金鑰</label>
                                 <div style="display: flex; gap: 8px;">
-                                    <input type="text" id="apiKey" readonly>
-                                    <button type="button" class="btn-action" id="generateKeyBtn">自動產生</button>
+                                    <input type="text" id="apiKey" readonly placeholder="儲存後由伺服器自動產生">
+                                    <button type="button" class="btn-action" id="generateKeyBtn" disabled>重新產生</button>
                                 </div>
                             </div>
                         </div>
                         <div id="periodFields" class="form-grid" style="margin-top: 20px; display: none;">
                             <div class="form-group">
-                                <label>開始日期</label>
+                                <label for="startDate">開始日期</label>
                                 <input type="date" id="startDate">
                             </div>
                             <div class="form-group">
-                                <label>結束日期</label>
+                                <label for="endDate">結束日期</label>
                                 <input type="date" id="endDate">
                             </div>
                         </div>
@@ -632,7 +633,7 @@
             window.location.href = '/login';
         };
 
-        // Key Management (Similar logic to existing, just styled)
+        // Persisted credentials are generated and rotated by the server.
         const keyTableBody = document.getElementById('keyTableBody');
         const keyTypeSelect = document.getElementById('keyType');
         const periodFields = document.getElementById('periodFields');
@@ -643,10 +644,16 @@
             periodFields.style.display = keyTypeSelect.value === 'periodic' ? 'grid' : 'none';
         };
 
-        async function fetchKeys() {
-            const res = await fetch('/api/app-keys');
+        async function keyRequest(url, options = {}) {
+            const res = await fetch(url, options);
             const json = await res.json();
-            cachedKeys = json.data || [];
+            if (res.status === 401) window.location.href = '/login';
+            if (!res.ok) throw new Error(json.message || '金鑰操作失敗');
+            return json.data;
+        }
+
+        async function fetchKeys() {
+            cachedKeys = await keyRequest('/api/app-keys');
             renderKeyTable();
         }
 
@@ -656,78 +663,109 @@
                 const row = document.createElement('tr');
                 row.innerHTML = `
                     <td>
-                        <div style="font-weight: 600;">${key.source_name}</div>
-                        <div style="font-size: 12px; color: var(--text-sub);">${key.app_name}</div>
+                        <div style="font-weight: 600;">${escapeHtml(key.source_name)}</div>
+                        <div style="font-size: 12px; color: var(--text-sub);">${escapeHtml(key.app_name)}</div>
                     </td>
-                    <td style="font-family: monospace; color: var(--primary);">${key.api_key}</td>
+                    <td style="font-family: monospace; color: var(--primary); overflow-wrap: anywhere;">${escapeHtml(key.api_key)}</td>
                     <td>
                         <div style="font-size: 13px;">${key.key_type === 'permanent' ? '永久' : '週期'}</div>
-                        ${key.end_date ? `<div style="font-size: 11px; color: var(--text-sub);">🗓️ ${key.end_date} 止</div>` : ''}
+                        ${key.end_date ? `<div style="font-size: 11px; color: var(--text-sub);">${escapeHtml(key.start_date)} ～ ${escapeHtml(key.end_date)}</div>` : ''}
                     </td>
                     <td>
                         <span class="status-dot ${key.status === 'active' ? 'status-active' : 'status-inactive'}"></span>
                         ${key.status === 'active' ? '啟用中' : '已停用'}
                     </td>
-                    <td>
-                        <button class="btn-action" onclick="editKey('${key.id}')">編輯</button>
-                    </td>
+                    <td></td>
                 `;
+                const actions = row.lastElementChild;
+                [['編輯', () => editKey(key.id)],
+                 ['重新產生', () => regenerateKey(key.id)],
+                 [key.status === 'active' ? '停用' : '啟用', () => toggleKey(key)]].forEach(([label, handler]) => {
+                    const button = document.createElement('button');
+                    button.type = 'button';
+                    button.className = 'btn-action';
+                    button.textContent = label;
+                    button.onclick = async () => {
+                        button.disabled = true;
+                        try { await handler(); } catch (error) { alert(error.message); }
+                        finally { button.disabled = false; }
+                    };
+                    actions.appendChild(button);
+                });
                 keyTableBody.appendChild(row);
             });
         }
 
-        document.getElementById('generateKeyBtn').onclick = async () => {
-            const res = await fetch('/api/app-keys/generate');
-            const data = await res.json();
-            document.getElementById('apiKey').value = data.data.api_key;
-        };
-
-        appKeyForm.onsubmit = async (e) => {
-            e.preventDefault();
-            const id = document.getElementById('appId').value;
-            const data = {
-                source_name: document.getElementById('sourceName').value,
-                app_name: document.getElementById('appName').value,
-                key_type: keyTypeSelect.value,
-                api_key: document.getElementById('apiKey').value,
-                start_date: document.getElementById('startDate').value,
-                end_date: document.getElementById('endDate').value,
-            };
-
-            const method = id ? 'PUT' : 'POST';
-            const url = id ? `/api/app-keys/${id}` : '/api/app-keys';
-
-            await fetch(url, {
-                method,
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
-            });
-
+        function clearKeyForm() {
             appKeyForm.reset();
             document.getElementById('appId').value = '';
-            fetchKeys();
+            document.getElementById('generateKeyBtn').disabled = true;
+            keyTypeSelect.onchange();
+        }
+
+        async function regenerateKey(id) {
+            if (!confirm('重新產生後，舊金鑰會立即失效。確定重新產生？')) return;
+            await keyRequest(`/api/app-keys/${encodeURIComponent(id)}/regenerate`, { method: 'POST' });
+            await fetchKeys();
+            editKey(id);
+            alert('已重新產生，請將新金鑰更新到串接系統。原啟用／停用狀態保持不變。');
+        }
+
+        async function toggleKey(key) {
+            const status = key.status === 'active' ? 'disabled' : 'active';
+            await keyRequest(`/api/app-keys/${encodeURIComponent(key.id)}`, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status })
+            });
+            await fetchKeys();
+        }
+
+        document.getElementById('generateKeyBtn').onclick = async () => {
+            try { await regenerateKey(document.getElementById('appId').value); }
+            catch (error) { alert(error.message); }
         };
 
-        window.editKey = (id) => {
-            const key = cachedKeys.find(k => k.id === id);
+        appKeyForm.onsubmit = async (event) => {
+            event.preventDefault();
+            const submit = appKeyForm.querySelector('[type="submit"]');
+            submit.disabled = true;
+            try {
+                const id = document.getElementById('appId').value;
+                const data = {
+                    source_name: document.getElementById('sourceName').value,
+                    app_name: document.getElementById('appName').value,
+                    key_type: keyTypeSelect.value,
+                    start_date: document.getElementById('startDate').value,
+                    end_date: document.getElementById('endDate').value,
+                };
+                const saved = await keyRequest(id ? `/api/app-keys/${encodeURIComponent(id)}` : '/api/app-keys', {
+                    method: id ? 'PUT' : 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                await fetchKeys();
+                editKey(saved.id);
+            } catch (error) { alert(error.message); }
+            finally { submit.disabled = false; }
+        };
+
+        function editKey(id) {
+            const key = cachedKeys.find(item => item.id === id);
             if (!key) return;
             document.getElementById('appId').value = key.id;
             document.getElementById('sourceName').value = key.source_name;
             document.getElementById('appName').value = key.app_name;
             document.getElementById('apiKey').value = key.api_key;
+            document.getElementById('generateKeyBtn').disabled = false;
             keyTypeSelect.value = key.key_type;
             document.getElementById('startDate').value = key.start_date || '';
             document.getElementById('endDate').value = key.end_date || '';
             keyTypeSelect.onchange();
-        };
+        }
 
-        document.getElementById('resetFormBtn').onclick = () => {
-            appKeyForm.reset();
-            document.getElementById('appId').value = '';
-            keyTypeSelect.onchange();
-        };
+        document.getElementById('resetFormBtn').onclick = clearKeyForm;
 
-        fetchKeys();
+        fetchKeys().catch(error => alert(error.message));
     </script>
 </body>
 

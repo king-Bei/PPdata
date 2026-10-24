@@ -2,3 +2,7 @@ __pycache__/
 *.pyc
 training-data/
 training-runs/
+
+# Runtime credential storage (existing tracked file is retained for compatibility)
+app_keys.json
+app_keys.json.lock

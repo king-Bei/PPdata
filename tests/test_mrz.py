@@ -221,6 +221,8 @@ class RecognitionTests(unittest.TestCase):
 class ApiTests(unittest.TestCase):
     def setUp(self):
         self.client = app.app.test_client()
+        with self.client.session_transaction() as session:
+            session["user"] = "admin"
         buffer = io.BytesIO()
         Image.new('RGB', (200, 100), 'white').save(buffer, format='PNG')
         self.image = buffer.getvalue()

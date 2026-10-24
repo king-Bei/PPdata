@@ -5,7 +5,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageOps, UnidentifiedImageError
 import pytesseract
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, session, send_file
 from flask_cors import CORS  # 新增
 import io
 import csv
@@ -14,15 +14,17 @@ import json
 import secrets
 import time
 from uuid import uuid4
+from urllib.parse import urlsplit
 from datetime import datetime, timezone
 from mrz import extract_mrz_data, parse_mrz, mrz_checksum, format_date
 from mrz_image import split_mrz_lines, perspective_mrz_candidates
+from api_keys import KeyStore, validate_key_record, key_is_usable
 
 # Tesseract's OpenMP oversubscription can turn a short MRZ scan into a timeout.
 os.environ.setdefault('OMP_THREAD_LIMIT', '1')
 
 app = Flask(__name__)
-app.secret_key = secrets.token_hex(24)  # For session support
+app.secret_key = os.environ.get('SESSION_SECRET') or secrets.token_hex(24)  # For session support
 CORS(app, origins=["https://jollify.voyage.com.tw:8443"])  # 新增
 
 # 設定 log 檔案
@@ -32,7 +34,7 @@ logging.basicConfig(level=logging.INFO)
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 DEFAULT_TESSDATA_DIR = os.path.join(BASE_DIR, "tessdata")
-APP_KEYS_FILE = os.path.join(BASE_DIR, "app_keys.json")
+APP_KEYS_FILE = os.environ.get("APP_KEYS_FILE", os.path.join(BASE_DIR, "app_keys.json"))
 OCR_LANGUAGE = os.environ.get('OCR_LANGUAGE', 'ocrb_candidate')
 if not re.fullmatch(r'[A-Za-z0-9_]+', OCR_LANGUAGE):
     raise ValueError('OCR_LANGUAGE 必須為模型名稱（不含路徑或副檔名）')
@@ -91,58 +93,75 @@ OCR_CONFIG = f'--tessdata-dir "{tessdata_dir}" --oem 1 --psm 6 -c tessedit_char_
 
 
 def load_app_keys():
-    if not os.path.exists(APP_KEYS_FILE):
-        return []
+    """Read persisted keys; invalid storage must fail closed."""
+    return KeyStore(APP_KEYS_FILE).read()
+
+
+@app.before_request
+def authorize_api_request():
+    """Restrict management to signed-in admins and OCR to usable keys or admins."""
+    if request.method == 'OPTIONS':
+        return None
+    management = request.path.startswith('/api/app-keys')
+    ocr = request.path in {'/api/ocr', '/api/ocr-csv'}
+    if not management and not ocr:
+        return None
+    if management:
+        if not session.get('user'):
+            return jsonify(status='error', message='請先登入管理帳號'), 401
+        # Browsers include Origin on cross-origin mutations; reject those requests.
+        origin = request.headers.get('Origin')
+        if request.method != 'GET' and origin:
+            try:
+                parsed_origin = urlsplit(origin)
+                # TLS may terminate at the deployment proxy; compare the public Host.
+                same_host = (parsed_origin.scheme in {'http', 'https'}
+                             and parsed_origin.netloc.lower() == request.host.lower())
+            except ValueError:
+                same_host = False
+            if not same_host:
+                return jsonify(status='error', message='不允許跨來源管理金鑰'), 403
+        return None
+    supplied = request.headers.get('X-API-Key')
+    if supplied is None and session.get('user'):
+        return None
+    if not supplied:
+        return jsonify(status='error', message='請在 X-API-Key 標頭提供有效金鑰'), 401
     try:
-        with open(APP_KEYS_FILE, 'r', encoding='utf-8') as file:
-            data = json.load(file) or []
-            if isinstance(data, list):
-                return data
-    except json.JSONDecodeError:
-        logging.warning("⚠️ app_keys.json 內容格式錯誤，將重新初始化")
-    except Exception as exc:
-        logging.error(f"❌ 無法讀取 app_keys.json: {exc}")
-    return []
+        keys = load_app_keys()
+    except (OSError, ValueError):
+        logging.exception('Unable to read API key storage')
+        return jsonify(status='error', message='金鑰儲存服務暫時無法使用'), 503
+    match = next((key for key in keys if secrets.compare_digest(
+        supplied.encode('utf-8'), key['api_key'].encode('utf-8'))), None)
+    if match is None:
+        return jsonify(status='error', message='無效的 API 金鑰'), 401
+    if not key_is_usable(match):
+        return jsonify(status='error', message='金鑰已停用或不在有效期間內'), 403
 
 
-def save_app_keys(data):
-    try:
-        with open(APP_KEYS_FILE, 'w', encoding='utf-8') as file:
-            json.dump(data, file, ensure_ascii=False, indent=2)
-    except Exception as exc:
-        logging.error(f"❌ 無法寫入 app_keys.json: {exc}")
-        raise
+@app.after_request
+def prevent_key_response_caching(response):
+    """Keep management responses containing credentials out of browser caches."""
+    if request.path.startswith('/api/app-keys'):
+        response.headers['Cache-Control'] = 'no-store'
+    return response
 
 
-def find_app_key(apps, app_id):
-    for app_key in apps:
-        if app_key.get('id') == app_id:
-            return app_key
-    return None
+def key_json_payload():
+    """Require a JSON object for key mutations, including status-only updates."""
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        raise ValueError('請提供 JSON 物件')
+    return payload
 
 
-def normalize_period_fields(payload):
-    start_date = payload.get('start_date')
-    end_date = payload.get('end_date')
-    if start_date:
-        start_date = start_date.strip()
-    if end_date:
-        end_date = end_date.strip()
-    return start_date or None, end_date or None
-
-
-def validate_key_payload(payload):
-    key_type = payload.get('key_type')
-    if key_type not in {'permanent', 'periodic'}:
-        raise ValueError('key_type 必須為 permanent 或 periodic')
-
-    start_date, end_date = normalize_period_fields(payload)
-    if key_type == 'periodic':
-        if not start_date or not end_date:
-            raise ValueError('週期金鑰需填寫開始與結束日期')
-        if start_date > end_date:
-            raise ValueError('結束日期需晚於開始日期')
-    return start_date, end_date
+def key_api_error(exc):
+    """Return validation/storage errors without disclosing stored credentials."""
+    if isinstance(exc, ValueError):
+        return jsonify(status='error', message=str(exc)), 400
+    logging.exception('API key storage operation failed')
+    return jsonify(status='error', message='金鑰儲存服務暫時無法使用'), 503
 
 
 @app.route('/')
@@ -153,6 +172,15 @@ def home():
         return redirect(url_for('login_page'))
     logging.info("📢 API 首頁被訪問")
     return render_template('index.html')
+
+
+@app.route('/api-guide')
+def download_api_guide():
+    """Provide the integration guide from the authenticated management page."""
+    if not session.get('user'):
+        from flask import redirect, url_for
+        return redirect(url_for('login_page'))
+    return send_file(os.path.join(BASE_DIR, 'API_GUIDE.md'), as_attachment=True)
 
 
 @app.route('/login')
@@ -186,91 +214,70 @@ def api_logout():
 
 @app.route('/api/app-keys', methods=['GET'])
 def list_app_keys():
-    logging.info("📋 讀取金鑰設定清單")
-    return jsonify({'status': 'success', 'data': load_app_keys()})
+    """List key configurations for the signed-in administrator."""
+    try:
+        return jsonify(status='success', data=load_app_keys())
+    except (OSError, ValueError):
+        return jsonify(status='error', message='金鑰儲存服務暫時無法使用'), 503
 
 
 @app.route('/api/app-keys', methods=['POST'])
 def create_app_key():
-    payload = request.get_json(force=True)
-    logging.info("➕ 建立新的來源金鑰")
-    for field in ('source_name', 'app_name'):
-        if not payload.get(field):
-            return jsonify({'status': 'error', 'message': f'{field} 為必填欄位'}), 400
-
+    """Generate a unique server-side key and persist its validated settings."""
     try:
-        start_date, end_date = validate_key_payload(payload)
-    except ValueError as err:
-        return jsonify({'status': 'error', 'message': str(err)}), 400
-
-    status = payload.get('status', 'active')
-    if status not in {'active', 'disabled'}:
-        return jsonify({'status': 'error', 'message': 'status 僅能為 active 或 disabled'}), 400
-
-    apps = load_app_keys()
-    now_utc = datetime.now(timezone.utc).isoformat()
-    new_app = {
-        'id': str(uuid4()),
-        'source_name': payload.get('source_name').strip(),
-        'app_name': payload.get('app_name').strip(),
-        'api_key': payload.get('api_key') or secrets.token_urlsafe(24),
-        'key_type': payload.get('key_type'),
-        'start_date': start_date,
-        'end_date': end_date,
-        'status': status,
-        'created_at': now_utc,
-        'updated_at': now_utc,
-    }
-    apps.append(new_app)
-    save_app_keys(apps)
-    return jsonify({'status': 'success', 'data': new_app}), 201
+        payload = key_json_payload()
+        now = datetime.now(timezone.utc).isoformat()
+        record = validate_key_record(payload)
+        record.update(id=str(uuid4()), created_at=now, updated_at=now)
+        def create(keys):
+            record['api_key'] = KeyStore.new_key(keys)
+            keys.append(record)
+            return record
+        result = KeyStore(APP_KEYS_FILE).mutate(create)
+        return jsonify(status='success', data=result), 201
+    except (OSError, ValueError) as exc:
+        return key_api_error(exc)
 
 
 @app.route('/api/app-keys/<app_id>', methods=['PUT'])
 def update_app_key(app_id):
-    payload = request.get_json(force=True)
-    apps = load_app_keys()
-    target = find_app_key(apps, app_id)
-    if not target:
-        return jsonify({'status': 'error', 'message': '找不到指定的來源金鑰'}), 404
-
-    if 'key_type' in payload:
-        try:
-            start_date, end_date = validate_key_payload({**target, **payload})
-        except ValueError as err:
-            return jsonify({'status': 'error', 'message': str(err)}), 400
-        target['key_type'] = payload['key_type']
-        target['start_date'] = start_date
-        target['end_date'] = end_date
-    elif target.get('key_type') == 'periodic' and ('start_date' in payload or 'end_date' in payload):
-        start_date = payload.get('start_date', target.get('start_date')) or ''
-        end_date = payload.get('end_date', target.get('end_date')) or ''
-        start_date = start_date.strip()
-        end_date = end_date.strip()
-        if not start_date or not end_date:
-            return jsonify({'status': 'error', 'message': '週期金鑰需同時提供起訖日期'}), 400
-        if start_date > end_date:
-            return jsonify({'status': 'error', 'message': '結束日期需晚於開始日期'}), 400
-        target['start_date'] = start_date
-        target['end_date'] = end_date
-
-    if 'status' in payload:
-        if payload['status'] not in {'active', 'disabled'}:
-            return jsonify({'status': 'error', 'message': 'status 僅能為 active 或 disabled'}), 400
-        target['status'] = payload['status']
-
-    for field in ('source_name', 'app_name', 'api_key'):
-        if field in payload and payload[field]:
-            target[field] = payload[field].strip() if isinstance(payload[field], str) else payload[field]
-
-    target['updated_at'] = datetime.now(timezone.utc).isoformat()
-    save_app_keys(apps)
-    return jsonify({'status': 'success', 'data': target})
+    """Update metadata or activation state; rotation has a separate endpoint."""
+    try:
+        payload = key_json_payload()
+        if 'api_key' in payload:
+            raise ValueError('金鑰由伺服器產生；請使用重新產生功能')
+        def update(keys):
+            target = next((key for key in keys if key['id'] == app_id), None)
+            if target is None:
+                return None
+            target.update(validate_key_record({**target, **payload}))
+            target['updated_at'] = datetime.now(timezone.utc).isoformat()
+            return target
+        result = KeyStore(APP_KEYS_FILE).mutate(update)
+        if result is None:
+            return jsonify(status='error', message='找不到指定的來源金鑰'), 404
+        return jsonify(status='success', data=result)
+    except (OSError, ValueError) as exc:
+        return key_api_error(exc)
 
 
-@app.route('/api/app-keys/generate', methods=['GET'])
-def generate_api_key():
-    return jsonify({'status': 'success', 'data': {'api_key': secrets.token_urlsafe(24)}})
+@app.route('/api/app-keys/<app_id>/regenerate', methods=['POST'])
+def regenerate_app_key(app_id):
+    """Replace a stored credential atomically; retain status and validity dates."""
+    try:
+        def rotate(keys):
+            target = next((key for key in keys if key['id'] == app_id), None)
+            if target is None:
+                return None
+            target['api_key'] = KeyStore.new_key(keys)
+            target['updated_at'] = datetime.now(timezone.utc).isoformat()
+            return target
+        result = KeyStore(APP_KEYS_FILE).mutate(rotate)
+        if result is None:
+            return jsonify(status='error', message='找不到指定的來源金鑰'), 404
+        return jsonify(status='success', data=result)
+    except (OSError, ValueError) as exc:
+        return key_api_error(exc)
 
 
 @app.route('/api/ocr', methods=['POST'])

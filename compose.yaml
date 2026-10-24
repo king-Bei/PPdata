@@ -9,6 +9,12 @@ services:
     environment:
       - TESSDATA_PREFIX=/usr/share/tesseract-ocr/4.00/tessdata
       - LANG=C.UTF-8
+      - APP_KEYS_FILE=/data/app_keys.json
+      - SESSION_SECRET=${SESSION_SECRET:-}
     volumes:
       - ./tessdata:/usr/share/tesseract-ocr/4.00/tessdata:ro
+      - api-key-data:/data
     restart: unless-stopped
+
+volumes:
+  api-key-data:

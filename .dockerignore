@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 training-data/
 training-runs/
+app_keys.json
+app_keys.json.lock

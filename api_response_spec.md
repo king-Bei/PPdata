@@ -8,6 +8,7 @@
 
 - **端點位置**: `/api/ocr`
 - **請求方法**: `POST`
+- **驗證**: 外部串接須提供 `X-API-Key` 標頭；金鑰建立、更新與停用方式見 [API 串接指南](API_GUIDE.md)。缺少或無效金鑰回傳 401，停用或不在有效期間內回傳 403。
 - **資料格式**: `multipart/form-data` (上傳檔案) 或 `application/json` (Base64 影像)
 - **主要功能**: 讀取護照影像中的機讀區 (MRZ, Machine Readable Zone)，解析並回傳正確的旅客資訊。
 
