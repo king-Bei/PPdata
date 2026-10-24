@@ -34,6 +34,8 @@
       "passport": true,
       "birth_date": true,
       "expiry_date": true,
+      "optional_data": true,
+      "composite": true,
       "overall": true
     }
   }
@@ -54,7 +56,7 @@
 | `passport_number` | String | 護照號碼 | 310000000 |
 | `nationality` | String | 國籍代碼 (ISO 3166-1 alpha-3) | TWN |
 | `birth_date` | String | 出生日期 (格式：`YYYY/MM/DD`) | 1990/01/01 |
-| `gender` | String | 性別 (`M`: 男, `F`: 女) | M |
+| `gender` | String | 性別 (`M`: 男, `F`: 女, `<`: 未指定；無效字元回傳空字串) | M |
 | `expiry_date` | String | 效期截止日 (格式：`YYYY/MM/DD`) | 2030/12/31 |
 | `ID_number` | String | 身分證字號或選填區域內容 | A123456789 |
 
@@ -67,7 +69,9 @@
 | `passport` | Boolean | 護照號碼校驗結果 |
 | `birth_date` | Boolean | 出生日期校驗結果 |
 | `expiry_date` | Boolean | 效期截止日校驗結果 |
-| `overall` | Boolean | 所有必要校驗是否全部通過 |
+| `optional_data` | Boolean | 選填資料校驗結果 |
+| `composite` | Boolean | 最後一碼綜合校驗結果 |
+| `overall` | Boolean | 五項校驗、有效日期與欄位格式是否全部通過 |
 
 ---
 
@@ -106,3 +110,13 @@
 ---
 > [!TIP]
 > 為了獲得最佳辨識效果，建議拍攝時光線充足、護照平整，且確保下方的兩行機讀碼區域沒有被手指或反光遮擋。
+
+## 辨識品質資訊
+
+成功回傳會另附 `data.recognition`：`attempts` 表示實際辨識嘗試次數，`ocr_calls` 表示啟動 OCR 的次數（最多 14），`method` 表示選用方式（整區、分行、透視校正或後備方式），`needs_review` 表示需人工核對。API 成功僅代表可解析完整 MRZ，不能據此假設校驗已通過；請同時檢查 `verification.overall`。姓名及中文姓名不受 MRZ 校驗碼保護。
+
+完整 MRZ 無法取得、非有效圖片或不正確的 Base64 請求回傳 400；OCR 引擎故障回傳 500；未取得候選結果且重試中發生逾時回傳 504。每次 OCR 上限 10 秒、最多 14 次，OCR 辨識階段共用 45 秒期限（不含前置影像處理）；另有中文姓名辨識上限 10 秒。
+
+日期依欄位推算世紀：出生日期取最近且不晚於今天的年份，到期日取最接近今天的年份。無效日期回傳 `Invalid Date` 並使對應校驗失敗。
+
+若回傳 `data.corrections`，代表曾移除外圍 OCR 雜訊或提出經全部校驗支持的單一護照號碼字元修正。此時即使 `verification.overall=true`，仍會標記 `recognition.needs_review=true`，需人工核對原圖。數字校驗碼本身不會因缺漏而被猜測補回。

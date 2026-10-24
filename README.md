@@ -11,7 +11,7 @@
 
 ## 系統需求
 
-- Python 3.7 以上
+- Python 3.9 以上
 - Tesseract OCR（需包含 `ocrb` 訓練資料）
 - OpenCV
 - Pillow
@@ -71,3 +71,15 @@ curl -X POST http://localhost:5002/api/ocr \
 ## 授權
 
 MIT License
+
+## 辨識改善與重新訓練
+
+辨識會結合區域定位、透視校正、兩行分開讀取與整頁後備方式重試；每次請求最多啟動 14 次 OCR，OCR 階段共用 45 秒期限，並檢查護照、日期、選填資料與綜合校驗碼。`verification.overall=false` 或 `recognition.needs_review=true` 時請人工核對。姓名不受 Checksum 保護。
+
+預設使用隨專案提供的微調模型 `ocrb_candidate`。使用 `OCR_LANGUAGE` 可選擇 tessdata 目錄中的其他模型（不含副檔名）；如需使用原版，設定 `OCR_LANGUAGE=ocrb` 後重新啟動。資料配對格式、訓練、模型比較與切換方式請見 [OCR_TRAINING.md](OCR_TRAINING.md)。
+
+執行回歸測試：
+
+```bash
+python -m unittest discover -s tests -v
+```

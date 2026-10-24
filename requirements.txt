@@ -5,9 +5,9 @@ itsdangerous
 Jinja2
 MarkupSafe
 numpy
-opencv-python-headless
+opencv-python-headless>=4.8,<5
 packaging
-pillow
+pillow>=9.1
 pytesseract
 Werkzeug
 flask-cors

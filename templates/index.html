@@ -479,6 +479,13 @@
             }
         });
 
+        // OCR and filenames are untrusted text, including input attribute values.
+        function escapeHtml(value) {
+            return String(value ?? '').replace(/[&<>"']/g, c => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            }[c]));
+        }
+
         let batchResults = [];
 
         uploadForm.onsubmit = async (e) => {
@@ -532,19 +539,19 @@
 
             if (res.status === 'success') {
                 const d = res.data;
-                const overall = d.verification.overall;
+                const overall = d.verification.overall && !d.recognition?.needs_review;
                 tr.innerHTML = `
-                    <td>${res.filename}</td>
-                    <td>${d.last_name} ${d.first_name}</td>
-                    <td>${d.passport_number}</td>
-                    <td>${d.nationality}</td>
-                    <td><span class="verif-badge ${overall ? 'verif-pass' : 'verif-fail'}">${overall ? '通過' : '警告'}</span></td>
+                    <td>${escapeHtml(res.filename)}</td>
+                    <td>${escapeHtml(d.last_name)} ${escapeHtml(d.first_name)}</td>
+                    <td>${escapeHtml(d.passport_number)}</td>
+                    <td>${escapeHtml(d.nationality)}</td>
+                    <td><span class="verif-badge ${overall ? 'verif-pass' : 'verif-fail'}">${overall ? '校驗通過' : '需人工核對'}</span></td>
                     <td><button class="btn-action" onclick="showDetail(${index})">查看</button></td>
                 `;
             } else {
                 tr.innerHTML = `
-                    <td>${res.filename}</td>
-                    <td colspan="4" style="color:var(--error); font-size:12px;">❌ 辨識失敗: ${res.message}</td>
+                    <td>${escapeHtml(res.filename)}</td>
+                    <td colspan="4" style="color:var(--error); font-size:12px;">❌ 辨識失敗: ${escapeHtml(res.message)}</td>
                     <td>-</td>
                 `;
             }
@@ -566,6 +573,7 @@
             container.innerHTML = '';
 
             const fields = [
+                { id: 'chinese_name', label: '中文姓名', value: data.chinese_name },
                 { id: 'passport_number', label: '護照號碼', value: data.passport_number, valid: data.verification.passport },
                 { id: 'ID_number', label: '身分證字號', value: data.ID_number },
                 { id: 'last_name', label: '姓 (Surname)', value: data.last_name },
@@ -575,6 +583,13 @@
                 { id: 'nationality', label: '國籍', value: data.nationality },
                 { id: 'gender', label: '性別', value: data.gender }
             ];
+
+            const note = document.createElement('p');
+            note.style.cssText = 'font-size:13px; color:var(--text-sub); margin-bottom:12px;';
+            note.textContent = '校驗結果不涵蓋姓名，請核對原圖。' +
+                (data.recognition ? ` 已嘗試 ${data.recognition.attempts} 種辨識方式。` : '') +
+                (data.corrections?.length ? ' 已修正可疑 OCR 字元或邊界雜訊，請人工核對。' : '');
+            container.appendChild(note);
 
             fields.forEach(f => {
                 const item = document.createElement('div');
@@ -590,7 +605,7 @@
                         ${badge}
                     </div>
                     <div class="input-with-copy">
-                        <input type="text" value="${f.value || ''}" readonly id="field-${f.id}">
+                        <input type="text" value="${escapeHtml(f.value)}" readonly id="field-${f.id}">
                         <button class="btn-copy" onclick="copyToClipboard('field-${f.id}')">複製</button>
                     </div>
                 `;
@@ -598,8 +613,10 @@
             });
 
             overallVerif.innerHTML = data.verification.overall
-                ? '<span class="verif-badge verif-pass">🛡️ 完整 Checksum 驗證成功</span>'
-                : '<span class="verif-badge verif-fail">⚠️ Checksum 驗證不完全</span>';
+                ? (data.recognition?.needs_review
+                    ? '<span class="verif-badge verif-fail">⚠️ 校驗通過，字元修正需人工核對</span>'
+                    : '<span class="verif-badge verif-pass">🛡️ 五項 Checksum 校驗通過</span>')
+                : '<span class="verif-badge verif-fail">⚠️ 校驗未完全通過，需人工核對</span>';
         }
 
         window.copyToClipboard = (id) => {

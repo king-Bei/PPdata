@@ -3,7 +3,7 @@ import base64
 import binascii
 import cv2
 import numpy as np
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, UnidentifiedImageError
 import pytesseract
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS  # 新增
@@ -12,8 +12,14 @@ import csv
 import re
 import json
 import secrets
+import time
 from uuid import uuid4
 from datetime import datetime, timezone
+from mrz import extract_mrz_data, parse_mrz, mrz_checksum, format_date
+from mrz_image import split_mrz_lines, perspective_mrz_candidates
+
+# Tesseract's OpenMP oversubscription can turn a short MRZ scan into a timeout.
+os.environ.setdefault('OMP_THREAD_LIMIT', '1')
 
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(24)  # For session support
@@ -27,6 +33,9 @@ logging.basicConfig(level=logging.INFO)
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 DEFAULT_TESSDATA_DIR = os.path.join(BASE_DIR, "tessdata")
 APP_KEYS_FILE = os.path.join(BASE_DIR, "app_keys.json")
+OCR_LANGUAGE = os.environ.get('OCR_LANGUAGE', 'ocrb_candidate')
+if not re.fullmatch(r'[A-Za-z0-9_]+', OCR_LANGUAGE):
+    raise ValueError('OCR_LANGUAGE 必須為模型名稱（不含路徑或副檔名）')
 
 # 模擬使用者資料（實際環境應使用資料庫與 Hash 密碼）
 USERS = {
@@ -49,7 +58,7 @@ def _dedupe_preserve_order(items):
 
 
 def resolve_tessdata_dir():
-    """Locate tessdata directory that contains ocrb.traineddata."""
+    """Locate tessdata directory containing the selected OCR model."""
     env_prefix = os.environ.get("TESSDATA_PREFIX")
     env_candidates = []
     if env_prefix:
@@ -66,19 +75,19 @@ def resolve_tessdata_dir():
     ])
 
     for candidate in candidates:
-        ocrb_file = os.path.join(candidate, "ocrb.traineddata")
+        ocrb_file = os.path.join(candidate, OCR_LANGUAGE + ".traineddata")
         if os.path.exists(ocrb_file):
             logging.info(f"✅ 訓練數據文件已存在: {ocrb_file}")
             return candidate
 
-    logging.error("❌ 找不到 ocrb.traineddata，請確認 tessdata 目錄配置是否正確")
+    logging.error("找不到 OCR 模型 %s", OCR_LANGUAGE)
     raise FileNotFoundError(
-        "❌ 無法找到 ocrb.traineddata。請確認已將檔案放置於 apippno/tessdata 或設定正確的 TESSDATA_PREFIX。"
+        f"無法找到 {OCR_LANGUAGE}.traineddata，請設定 TESSDATA_PREFIX 或放入專案 tessdata 目錄。"
     )
 
 
 tessdata_dir = resolve_tessdata_dir()
-OCR_CONFIG = f'--tessdata-dir "{tessdata_dir}" --psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<'
+OCR_CONFIG = f'--tessdata-dir "{tessdata_dir}" --oem 1 --psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<'
 
 
 def load_app_keys():
@@ -281,6 +290,8 @@ def ocr_in_memory():
     else:
         # 嘗試從 JSON 或表單欄位讀取 Base64 影像
         payload = request.get_json(silent=True) or {}
+        if not isinstance(payload, dict):
+            return jsonify({'status': 'error', 'message': 'JSON must be an object'}), 400
         base64_string = (
             payload.get('image_base64')
             or payload.get('image')
@@ -289,6 +300,8 @@ def ocr_in_memory():
         )
 
         if base64_string:
+            if not isinstance(base64_string, str):
+                return jsonify({'status': 'error', 'message': 'Invalid base64 image data'}), 400
             try:
                 # 支援 data URL 格式，如 data:image/png;base64,XXXX
                 if ',' in base64_string:
@@ -307,24 +320,21 @@ def ocr_in_memory():
 
     try:
         # 以 Pillow 開啟影像
-        image = Image.open(io.BytesIO(image_data))
+        image = load_image(image_data)
         logging.info(f"🖼️ 影像來源: {source_desc} 已成功載入")
 
-        # 影像預處理
-        data_page, processed_image = preprocess_image_pil(image)
-        logging.info("🔄 影像已預處理完成")
-
-        # OCR 辨識
-        detected_text = pytesseract.image_to_string(processed_image, lang='ocrb', config=OCR_CONFIG)
-        logging.info(f"✅ OCR 辨識完成，識別結果: {detected_text[:50]}...")
-
-        # 解析 MRZ 資料
-        mrz_data = extract_mrz_data(detected_text)
+        data_page, mrz_data, detected_text = recognize_passport(image)
         
         # 中文辨識
         mrz_data['chinese_name'] = extract_chinese_name(data_page)
 
         return jsonify({'status': 'success', 'data': mrz_data}), 200
+
+    except pytesseract.TesseractError:
+        logging.exception('OCR engine error')
+        return jsonify({'status': 'error', 'message': 'Internal Server Error'}), 500
+    except RuntimeError:
+        return jsonify({'status': 'error', 'message': 'OCR 執行逾時，請縮小圖片或重新拍攝'}), 504
 
     except ValueError as ve:
         logging.error(f"❌ MRZ 解析錯誤: {str(ve)}")
@@ -333,6 +343,16 @@ def ocr_in_memory():
     except Exception as e:
         logging.error(f"❌ OCR 過程發生錯誤: {str(e)}")
         return jsonify({'status': 'error', 'message': 'Internal Server Error'}), 500
+
+
+def load_image(data):
+    """Decode input fully so invalid image errors are distinct from engine errors."""
+    try:
+        image = Image.open(io.BytesIO(data))
+        image.load()
+        return image
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
+        raise ValueError('Invalid image data') from exc
 
 
 def detect_mrz_region(image):
@@ -353,10 +373,11 @@ def detect_mrz_region(image):
     gradX = cv2.Sobel(blackhat, ddepth=cv2.CV_32F, dx=1, dy=0, ksize=-1)
     gradX = np.absolute(gradX)
     (minVal, maxVal) = (np.min(gradX), np.max(gradX))
+    if maxVal <= minVal:
+        return Image.fromarray(gray)
     gradX = (255 * ((gradX - minVal) / (maxVal - minVal))).astype("uint8")
 
     # 3. 閉合運算填補字元間隙
-    sqKernel = cv2.getStructuringElement(cv2.MORPH_RECT, (21, 11)) # 針對橫向文字調優
     gradX = cv2.morphologyEx(gradX, cv2.MORPH_CLOSE, kernel)
     thresh = cv2.threshold(gradX, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
 
@@ -404,9 +425,11 @@ def detect_mrz_region(image):
         angle += 90
         size = (size[1], size[0])
 
+    # Normalize the long-edge angle, avoiding upside-down crops.
+    angle = (angle + 90) % 180 - 90
     # 執行旋轉校正
     M = cv2.getRotationMatrix2D(center, angle, 1.0)
-    rotated = cv2.warpAffine(gray, M, (w, h), flags=cv2.INTER_CUBIC)
+    rotated = cv2.warpAffine(gray, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_CONSTANT, borderValue=255)
     
     # 在校正後的圖片中進行剪裁
     # 稍微放大 size 以包含 Padding
@@ -455,6 +478,9 @@ def crop_to_data_page_via_face(image):
         gray = cv_img
 
     # 載入 Haar Cascade 模型
+    if not hasattr(cv2, 'CascadeClassifier') or not hasattr(cv2, 'data'):
+        logging.info('目前的 OpenCV 未提供人臉分類器，直接使用影像進行 MRZ 定位')
+        return image
     face_cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
     face_cascade = cv2.CascadeClassifier(face_cascade_path)
     
@@ -483,19 +509,142 @@ def crop_to_data_page_via_face(image):
     return image
 
 
-def preprocess_image_pil(image):
+def preprocess_image_pil(image, include_original=False):
     """
     使用 PIL 和 OpenCV 處理影像，提高 OCR 的辨識精度
     """
     # 轉為灰階
+    image = ImageOps.exif_transpose(image)
+    if image.mode in ('RGBA', 'LA') or (image.mode == 'P' and 'transparency' in image.info):
+        rgba = image.convert('RGBA')
+        background = Image.new('RGBA', image.size, 'white')
+        image = Image.alpha_composite(background, rgba).convert('RGB')
     gray = ImageOps.grayscale(image)
+    if gray.width < 20 or gray.height < 20:
+        raise ValueError('圖片尺寸過小，無法辨識')
+    if max(gray.size) > 2400:
+        gray.thumbnail((2400, 2400), Image.Resampling.LANCZOS)
     
     # 1. 人臉輔助裁切 (去掉可能的上方簽名頁)
     cropped_by_face = crop_to_data_page_via_face(gray)
     
     # 2. 進行 MRZ 定位
     mrz_region = detect_mrz_region(cropped_by_face)
+    if include_original:
+        return cropped_by_face, mrz_region, gray
     return cropped_by_face, mrz_region
+
+
+def mrz_image_variants(page, region, original=None):
+    """Yield page/crop pairs lazily so successful scans avoid fallback processing."""
+    yield page, region
+    binary = Image.fromarray(cv2.threshold(
+        np.array(region), 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1])
+    yield page, binary
+    # A large face on another ID card must not permanently remove the passport.
+    original = original if original is not None else page
+    yield original, original.crop((0, int(original.height * .45), original.width, original.height))
+    yield original, original
+    upper = original.crop((0, 0, original.width, int(original.height * .65)))
+    yield original, detect_mrz_region(upper)
+    inverted_page = original.transpose(Image.Transpose.ROTATE_180)
+    yield inverted_page, detect_mrz_region(inverted_page)
+    yield inverted_page, inverted_page
+
+
+def recognition_attempts(page, region, original):
+    """Try split lines and rectified strips before expensive full-page fallbacks."""
+    variants = iter(mrz_image_variants(page, region, original))
+    yield page, region, 'block', [(region, 6)]
+    lines = split_mrz_lines(region)
+    if lines:
+        yield page, region, 'split_lines', [(line, 13) for line in lines]
+        yield page, region, 'mixed_lines', [(lines[0], 13), (lines[1], 7)]
+        yield page, region, 'single_lines', [(line, 7) for line in lines]
+    next(variants)  # First region was already emitted above.
+    oriented, binary = next(variants)
+    yield oriented, binary, 'binary', [(binary, 6)]
+    for candidate in perspective_mrz_candidates(original, limit=2):
+        lines = split_mrz_lines(candidate)
+        if lines:
+            yield original, candidate, 'perspective_split', [(line, 13) for line in lines]
+            yield original, candidate, 'perspective_mixed', [(lines[0], 13), (lines[1], 7)]
+            yield original, candidate, 'perspective_single', [(line, 7) for line in lines]
+        else:
+            yield original, candidate, 'perspective_block', [(candidate, 6)]
+    for oriented, variant in variants:
+        yield oriented, variant, 'fallback', [(variant, 6)]
+
+
+def recognize_passport(image, include_crop=False):
+    """Read bounded block/line candidates without consulting training labels."""
+    page, region, original = preprocess_image_pil(image, include_original=True)
+    best = None
+    best_score = None
+    timed_out = 0
+    calls = 0
+    cache = {}
+    attempts = 0
+    deadline = time.monotonic() + 45
+    for oriented_page, variant, method, inputs in recognition_attempts(page, region, original):
+        # Keep source objects alive with the cache, so Python cannot reuse their ids.
+        missing = sum((id(source), psm) not in cache for source, psm in inputs)
+        if calls + missing > 14 or time.monotonic() >= deadline:
+            break
+        attempts += 1
+        texts = []
+        try:
+            for source, psm in inputs:
+                cache_key = (id(source), psm)
+                if cache_key in cache:
+                    texts.append(cache[cache_key][1])
+                    continue
+                original_source = source
+                if psm == 6:
+                    if source.width < 1400:
+                        scale = min(3, 1400 / source.width)
+                        source = source.resize((int(source.width * scale), int(source.height * scale)), Image.Resampling.LANCZOS)
+                    source = ImageOps.expand(source, border=20, fill='white')
+                # Raw-line normalization uses the whole line height. Extra block-style
+                # padding would shrink the glyphs relative to the training images.
+                remaining = deadline-time.monotonic()
+                if remaining <= 0:
+                    raise RuntimeError('OCR request deadline')
+                calls += 1
+                recognized = pytesseract.image_to_string(
+                    source, lang=OCR_LANGUAGE, config=OCR_CONFIG.replace('--psm 6', f'--psm {psm}'),
+                    timeout=min(10, remaining))
+                cache[cache_key] = (original_source, recognized)
+                texts.append(recognized)
+        except pytesseract.TesseractError:
+            raise
+        except RuntimeError:
+            timed_out += 1
+            continue
+        text = '\n'.join(texts)
+        try:
+            data = extract_mrz_data(text)
+        except ValueError:
+            continue
+        has_corrections = bool(data.get('corrections'))
+        score = (data['verification']['overall'], not has_corrections,
+                 sum(data['verification'].values()))
+        if best_score is None or score > best_score:
+            data['recognition'] = {
+                'attempts': attempts, 'ocr_calls': calls, 'method': method,
+                'needs_review': not data['verification']['overall'] or bool(data.get('corrections')),
+            }
+            best = (oriented_page, data, text, variant)
+            best_score = score
+        # A clean verified read takes precedence over a corrected suggestion.
+        if data['verification']['overall'] and not has_corrections:
+            return best if include_crop else best[:3]
+    if best:
+        best[1]['recognition'].update(attempts=attempts, ocr_calls=calls)
+        return best if include_crop else best[:3]
+    if timed_out or calls >= 14 or time.monotonic() >= deadline:
+        raise RuntimeError('OCR timeout or request budget exhausted')
+    raise ValueError('找不到完整護照 MRZ，請確認兩行機讀碼清晰、未被裁切或遮擋')
 
 
 def extract_chinese_name(data_page_image):
@@ -517,9 +666,9 @@ def extract_chinese_name(data_page_image):
     top_region = clahe.apply(top_region)
     
     try:
-        chi_config = f'--tessdata-dir "{tessdata_dir}" --psm 6'
-        text = pytesseract.image_to_string(Image.fromarray(top_region), lang='chi_tra', config=chi_config)
-        logging.info(f"🇹🇼 中文 OCR 結果片段：{text[:30].replace(chr(10), ' ')}...")
+        chi_dir = tessdata_dir if os.path.isfile(os.path.join(tessdata_dir, 'chi_tra.traineddata')) else DEFAULT_TESSDATA_DIR
+        chi_config = f'--tessdata-dir "{chi_dir}" --psm 6'
+        text = pytesseract.image_to_string(Image.fromarray(top_region), lang='chi_tra', config=chi_config, timeout=10)
         
         lines = text.split('\n')
         for line in lines:
@@ -545,145 +694,6 @@ def extract_chinese_name(data_page_image):
 
 
 
-def extract_mrz_data(text):
-    """
-    從 OCR 結果中搜尋並提取 MRZ 資料
-    """
-    # 預先清理：移除多餘空格，轉大寫，過濾非法字元（保留 A-Z, 0-9, <, \n）
-    cleaned_text = re.sub(r'[^A-Z0-9<\n]', '', text.upper())
-    lines = [line.strip() for line in cleaned_text.split('\n') if len(line.strip()) >= 30]
-
-    logging.info(f"🔍 過濾後的候選行數: {len(lines)}")
-    for i, line in enumerate(lines):
-         logging.info(f"   Line {i}: {line[:10]}... ({len(line)} chars)")
-
-    # 尋找最像 MRZ 的兩行（通常長度為 44，且包含多個 <）
-    mrz_candidates = []
-    for line in lines:
-        # 護照 MRZ (Type 3) 通常是 44 字元
-        if 43 <= len(line) <= 46:
-            mrz_candidates.append(line[:44])
-        # 有些情況 OCR 會把兩行接在一起或切斷，暫不處理複雜情況
-
-    if len(mrz_candidates) < 2:
-        # 嘗試寬鬆匹配：只要有兩行長度接近的
-        if len(lines) >= 2:
-            # 優先取最後兩行長度 > 30 的
-            mrz_line1 = lines[-2]
-            mrz_line2 = lines[-1]
-            logging.warning("⚠️ 未找到標準 44 字元行，使用最後兩行候選")
-        else:
-            logging.error(f"❌ 解析失敗。OCR 原始內容內容: {text}")
-            raise ValueError(f"MRZ 資料不足，無法解析。識別到的有效行數：{len(lines)}")
-    else:
-        # 取最後兩個符合 44 字元的（避免上方有干擾文字）
-        mrz_line1 = mrz_candidates[-2]
-        mrz_line2 = mrz_candidates[-1]
-
-    return parse_mrz(mrz_line1, mrz_line2)
-
-def mrz_checksum(data):
-    """計算 MRZ 檢查碼 (ICAO 9303 標準)"""
-    weight = [7, 3, 1]
-    total = 0
-    for i, char in enumerate(data):
-        if '0' <= char <= '9':
-            val = ord(char) - ord('0')
-        elif 'A' <= char <= 'Z':
-            val = ord(char) - ord('A') + 10
-        elif char == '<':
-            val = 0
-        else:
-            val = 0
-        total += val * weight[i % 3]
-    return total % 10
-
-def parse_mrz(line1, line2):
-    """
-    解析 MRZ 資料並進行 Checksum 驗證
-    """
-    # 輔助函式：自動修正 OCR 易混淆字元
-    def fix_digits(s):
-        return s.replace('O', '0').replace('D', '0').replace('I', '1').replace('S', '5').replace('Q', '0').replace('U', '0')
-    def fix_letters(s):
-        return s.replace('0', 'O').replace('1', 'I').replace('5', 'S').replace('8', 'B')
-
-    try:
-        # 移除非法字元
-        line1 = re.sub(r'[^A-Z0-9<]', '', line1.upper())
-        line2 = re.sub(r'[^A-Z0-9<]', '', line2.upper())
-
-        # 基本格式檢查
-        if len(line1) < 44 or len(line2) < 44:
-            raise ValueError("MRZ 長度不足")
-
-        names = line1[5:44].split('<<')
-        last_name = fix_letters(names[0].replace('<', ' ')).strip()
-        first_name = fix_letters(names[1].replace('<', ' ')).strip() if len(names) > 1 else ""
-
-        # 護照號碼可能同時有英文數字，不貿然修正全部
-        passport_number = line2[0:9].replace('<', '').strip()
-        pass_check = fix_digits(line2[9]) # Checksum 必為數字
-
-        birth_date_raw = fix_digits(line2[13:19])
-        birth_check = fix_digits(line2[19])
-
-        expiry_date_raw = fix_digits(line2[21:27])
-        expiry_check = fix_digits(line2[27])
-
-        # 驗證 Checksum
-        valid_passport = str(mrz_checksum(line2[0:9])) == pass_check
-        valid_birth = str(mrz_checksum(birth_date_raw)) == birth_check
-        valid_expiry = str(mrz_checksum(expiry_date_raw)) == expiry_check
-
-        nationality = line2[10:13].replace('<', '').strip()
-        gender = 'M' if line2[20] == 'M' else 'F'
-        ID_number = line2[28:42].replace('<', '').strip()
-
-        return {
-            "last_name": last_name,
-            "first_name": first_name,
-            "passport_number": passport_number,
-            "nationality": nationality,
-            "birth_date": format_date(birth_date_raw),
-            "gender": gender,
-            "expiry_date": format_date(expiry_date_raw),
-            "ID_number": ID_number,
-            "verification": {
-                "passport": valid_passport,
-                "birth_date": valid_birth,
-                "expiry_date": valid_expiry,
-                "overall": valid_passport and valid_birth and valid_expiry
-            }
-        }
-    except Exception as e:
-        logging.error(f"MRZ 解析失敗: {e}")
-        raise ValueError(f"MRZ 解析失敗: {str(e)}")
-
-
-
-def format_date(date_string):
-    """
-    將 MRZ 日期格式 (YYMMDD) 轉換為 YYYY/MM/DD
-    """
-    if not re.match(r'^\d{6}$', date_string):
-        return "Invalid Date"
-
-    year = int(date_string[:2])
-    month = int(date_string[2:4])
-    day = int(date_string[4:6])
-
-    # 判斷 1900 或 2000 年代
-    full_year = 2000 + year if year < 50 else 1900 + year
-
-    try:
-        return datetime(full_year, month, day).strftime("%Y/%m/%d")
-    except ValueError:
-        return "Invalid Date"
-
-
-
-
 @app.route('/api/ocr-csv', methods=['POST'])
 def ocr_in_memory_csv():
     """
@@ -701,13 +711,11 @@ def ocr_in_memory_csv():
         image_data = file.read()
         logging.info(f"📸 影像 {file.filename} 已讀取，大小: {len(image_data)} bytes")
 
-        image = Image.open(io.BytesIO(image_data))
+        image = load_image(image_data)
         logging.info("🖼️ 影像已成功載入")
 
         # 預處理 + OCR
-        data_page, processed_image = preprocess_image_pil(image)
-        detected_text = pytesseract.image_to_string(processed_image, lang='ocrb', config=OCR_CONFIG)
-        logging.info(f"✅ OCR 辨識完成，識別結果: {detected_text[:50]}...")
+        data_page, mrz_data, detected_text = recognize_passport(image)
 
         # 準備寫入 CSV
         now = datetime.now()
@@ -737,6 +745,12 @@ def ocr_in_memory_csv():
             'detected_text': detected_text
         }), 200
 
+    except ValueError:
+        return jsonify({'error': 'Invalid image or MRZ data'}), 400
+    except pytesseract.TesseractError:
+        return jsonify({'error': 'Internal Server Error'}), 500
+    except RuntimeError:
+        return jsonify({'error': 'OCR 執行逾時'}), 504
     except Exception as e:
         logging.error(f"❌ OCR CSV 處理過程發生錯誤: {str(e)}")
         return jsonify({'error': str(e)}), 500
